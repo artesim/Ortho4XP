@@ -16,10 +16,10 @@ import O4_Overlay_Utils as OVL
 cfg_vars={
     # App
     'verbosity':             {'module':'UI','type':int,'default':1,'values':[0,1,2,3],'hint':'Verbosity determines the amount of information about the whole process which is printed on screen.  Critical errors, if any, are reported in all states as well as in the Log. Values above 1 are probably only useful for for debug purposes.'},  
-    'cleaning_level':        {'module':'UI','type':int,'default':1,'values':[0,1,2,3],'hint':'Determines which temporary files are removed. Level 3 erases everything except the config and what is needed for X-Plane; Level 2 erases everything except what is needed to redo the current step only; Level 1 allows you to redo any prior step; Level 0 keeps every single file.'}, 
+    'cleaning_level':        {'module':'UI','type':int,'default':1,'values':[0,1,2,3],'hint':'Determines which temporary files are removed. Level 3 erases everything except the config and what is needed for X-Plane; Level 2 erases everything except what is needed to redo the current step only; Level 1 allows you to redo any prior step; Level 0 keeps every single file.'},
     'overpass_server_choice':{'module':'OSM','type':str,'default':'random','values':['random']+sorted(OSM.overpass_servers.keys()),'hint':'The (country) of the Overpass OSM server used to grab vector data. It can be modified on the fly (as all _Application_ variables) in case of problem with a particular server.'},
     'skip_downloads':        {'module':'TILE','type':bool,'default':False,'hint':'Will only build the DSF and TER files but not the textures (neither download nor convert). This could be useful in cases where imagery cannot be shared.'},
-    'skip_converts':         {'module':'TILE','type':bool,'default':False,'hint':'Imagery will be downloaded but not converted from jpg to dds. Some user prefer to postprocess imagery with third party softwares prior to the dds conversion. In that case Step 3 needs to be run a second time after the retouch work.'}, 
+    'skip_converts':         {'module':'TILE','type':bool,'default':False,'hint':'Imagery will be downloaded but not converted from jpg to dds. Some user prefer to postprocess imagery with third party softwares prior to the dds conversion. In that case Step 3 needs to be run a second time after the retouch work.'},
     'max_convert_slots':     {'module':'TILE','type':int,'default':4,'values':[1,2,3,4,5,6,7,8],'hint':'Number of parallel threads for dds conversion. Should be mainly dictated by the number of cores in your CPU.'},
     'check_tms_response':    {'module':'IMG','type':bool,'default':True,'hint':'When set, internal server errors (HTTP [500] and the likes) yields new requests, if not a white texture is used in place.'},
     'http_timeout':          {'module':'IMG','type':float,'default':10,'hint':'Delay before we decide that a http request is timed out.'},
@@ -27,13 +27,13 @@ cfg_vars={
     'max_baddata_retries':   {'module':'IMG','type':int,'default':5,'hint':'How much times do we try again after an internal server error for an imagery request. Only used if check_tms_response is set to True.'},
     'ovl_exclude_pol'    :   {'module':'OVL','type':list,'default':[0],'hint':'Indices of polygon types which one would like to left aside in the extraction of overlays. The list of these indices in front of their name can be obtained by running the "extract overlay" process with verbosity = 2 (skip facades that can be numerous) or 3. Index 0 corresponds to beaches in Global and HD sceneries.'},
     'ovl_exclude_net'    :   {'module':'OVL','type':list,'default':[],'hint':'Indices of road types which one would like to left aside in the extraction of overlays. The list of these indices is can be in the roads.net file within X-Plane Resources, but some sceneries use their own corresponding net definition file. Powerlines have index 22001 in XP11 roads.net default file.'},
-    'custom_scenery_dir':    {'type':str,'default':'','hint':'Your X-Plane Custom Scenery. Used only for "1-click" creation (or deletion) of symbolic links from Ortho4XP tiles to there.'},
+    'xplane_install_dir':    {'type':str,'default':'<X-Plane Top Level directory>','hint':'Your X-Plane top-level directory. Used to find and parse the X-Plane apt.dat files. Also used for "1-click" linking of tiles from Ortho4XP to the X-Plane Custom Scenery folder. Supersedes the old "custom_scenery_dir" config option'},
     'custom_overlay_src':    {'module':'OVL','type':str,'default':'','hint':'The directory containing the sceneries with the overlays you would like to extract. You need to select the level of directory just _ABOVE_ Earth nav data.'},
     # Vector
     'road_level':          {'type':int,'default':1,'values':[0,1,2,3,4,5],'hint':'Allows to level the mesh along roads and railways. Zero means nothing such is included; "1" looks for banking ways among motorways, primary and secondary roads and railway tracks; "2" adds tertiary roads; "3" brings residential and unclassified roads; "4" takes service roads, and 5 finishes with tracks. Purge the small_roads.osm cached data if you change your mind in between the levels 2-5.'},
-    'road_banking_limit':  {'type':float,'default':0.5,'hint':"How much sloped does a roads need to be to be in order to be included in the mesh levelling process. The value is in meters, measuring the height difference between a point in the center of a road node and its closest point on the side of the road."}, 
+    'road_banking_limit':  {'type':float,'default':0.5,'hint':"How much sloped does a roads need to be to be in order to be included in the mesh levelling process. The value is in meters, measuring the height difference between a point in the center of a road node and its closest point on the side of the road."},
     'max_levelled_segs':   {'type':int,'default':100000,'hint':"This limits the total number of roads segments included for mesh levelling, in order to keep triangle count under control in case of abundant OSM data."},
-    'min_area':            {'type':float,'default':0.001,'hint':"Minimum area (in km^2) a water patch needs to be in order to be included in the mesh as such. Contiguous water patches are merged before area computation."}, 
+    'min_area':            {'type':float,'default':0.001,'hint':"Minimum area (in km^2) a water patch needs to be in order to be included in the mesh as such. Contiguous water patches are merged before area computation."},
     'max_area':            {'type':float,'default':200,'hint':"Any water patch larger than this quantity (in km^2) will be masked like the sea."},
     'clean_bad_geometries':{'type':bool,'default':True,'hint':"When set, all OSM geometries are checked for self-intersection and merged between themselves in case of overlapping, allowing (hopefully!) to go around most OSM errors. This is computationally expensive, especially in places where OSM road/water data is detailed, and this is the reason for this switch, but if you are not in a hurry it is probably wise leaving it always activated."},
     'mesh_zl':             {'type':int,'default':19,'values':[16,17,18,19,20],'hint':"The mesh will be preprocessed to accept later any combination of imageries up to and including a zoomlevel equal to mesh_zl. Lower value could save a few tens of thousands triangles, but put a limitation on the maximum allowed imagery zoomlevel."},
@@ -44,12 +44,12 @@ cfg_vars={
     'coast_curv_tol':      {'type':float,'default':1,'hint':"If smaller, it supersedes curvature_tol along the coastline."},
     'coast_curv_ext':      {'type':float,'default':0.5,'hint':"Extent (in km) around the coastline where coast_curv_tol applies."},
     'limit_tris'    :      {'type':int,  'default':0,'hint':"If non zero, upper bound on the number of final triangles in the mesh."},
-    'hmin':                {'type':float,'default':0,'hint':"The mesh algorithm will not try to subdivide triangles whose shortest edge is already smaller than hmin (in meters). If hmin is smaller than half of the levation data step size, it will default to it anyhow (its default zero value thus means : as good as the DEM can do)."}, 
+    'hmin':                {'type':float,'default':0,'hint':"The mesh algorithm will not try to subdivide triangles whose shortest edge is already smaller than hmin (in meters). If hmin is smaller than half of the levation data step size, it will default to it anyhow (its default zero value thus means : as good as the DEM can do)."},
     'min_angle':           {'type':float,'default':10,'hint':"The mesh algorithm will try to not have mesh triangles with second smallest angle less than the value (in deg) of min_angle (prior to v1.3 it was the smallest, not second smallest) The goal behind this is to avoid potential artifacts when a triangle vertex is very close the the middle of its facing edge."},
     'apt_smoothing_pix':   {'type':int,  'default':8,'hint':"How much gaussian blur is applied to the elevation raster for the look up of altitude over airports. Unit is the evelation raster pixel size."},
     'sea_smoothing_mode':  {'type':str,  'default':'zero','values':['zero','mean','none'],'hint':"Zero means that all nodes of sea triangles are set to zero elevation. With mean, some kind of smoothing occurs (triangles are levelled one at a time to their mean elevation), None (a value mostly appropriate for DEM resolution of 10m and less), positive altitudes of sea nodes are kept intact, only negative ones are brought back to zero, this avoids to create unrealistic vertical cliffs if the coastline vector data was lower res."},
     'water_smoothing':     {'type':int,  'default':10,'hint':"Number of smoothing passes over all inland water triangles (sequentially set to their mean elevation)."},
-    'iterate':             {'type':int,  'default':0,'hint':"Allows to refine a mesh using higher resolution elevation data of local scope only (requires Gdal), typically LIDAR data. Having an iterate number is handy to go backward one step when some choice of parameters needs to be revised. REQUIRES cleaning_level=0."},     
+    'iterate':             {'type':int,  'default':0,'hint':"Allows to refine a mesh using higher resolution elevation data of local scope only (requires Gdal), typically LIDAR data. Having an iterate number is handy to go backward one step when some choice of parameters needs to be revised. REQUIRES cleaning_level=0."},
     # Masks
     'mask_zl':             {'type':int,'default':15,'hint':'The zoomlevel at which the (sea) water masks are built. Masks are used for alpha channel, and this channel usually requires less resolution than the RGB ones, the reason for this (VRAM saving) parameter. If the coastline and elevation data are very detailed, it might be interesting to lieft this parameter up so that the masks can reproduce this complexity.'},
     'masks_width':         {'type':list,'default':100,'hint':'Maximum extent of the masks perpendicularly to the coastline (rough definition). NOTE: The value is now in meters, it used to be in ZL14 pixel size in earlier verions, the scale is roughly one to ten between both.'},
@@ -79,7 +79,7 @@ cfg_vars={
 
 list_app_vars=['verbosity','cleaning_level','overpass_server_choice',
                'skip_downloads','skip_converts','max_convert_slots','check_tms_response',
-               'http_timeout','max_connect_retries','max_baddata_retries','ovl_exclude_pol','ovl_exclude_net','custom_scenery_dir','custom_overlay_src']
+               'http_timeout','max_connect_retries','max_baddata_retries','ovl_exclude_pol','ovl_exclude_net','xplane_install_dir','custom_overlay_src']
 gui_app_vars_short=list_app_vars[:-2]
 gui_app_vars_long=list_app_vars[-2:]
 
@@ -120,15 +120,14 @@ try:
             UI.lvprint(1,"Global config file contains an invalide line:",line)
             pass
     f.close()
-except: 
-    print("No global config file found. Reverting to default values.") 
+except:
+    print("No global config file found. Reverting to default values.")
 
 
 ############################################################################################
 class Tile():
-
     def __init__(self,lat,lon,custom_build_dir):
-        
+
         self.lat=lat
         self.lon=lon
         self.custom_build_dir=custom_build_dir
@@ -137,23 +136,23 @@ class Tile():
         self.dem=None
         for var in list_tile_vars:
             exec("self."+var+"="+var)
-    
+
     def make_dirs(self):
         if os.path.isdir(self.build_dir):
-            if not os.access(self.build_dir,os.W_OK): 
+            if not os.access(self.build_dir,os.W_OK):
                 UI.vprint(0,"OS error: Tile directory",self.build_dir," is write protected.")
-                raise Exception 
-        else: 
+                raise Exception
+        else:
             try: os.makedirs(self.build_dir)
             except:
                 UI.vprint(0,"OS error: Cannot create tile directory",self.build_dir," check file permissions.")
                 raise Exception
 
-    def ensure_elevation_data(self,info_only=False):    
+    def ensure_elevation_data(self,info_only=False):
         self.dem=DEM.DEM(self.lat,self.lon,self.custom_dem,self.fill_nodata,info_only)
 
     def read_from_config(self,config_file=None):
-        if not config_file: 
+        if not config_file:
             config_file=os.path.join(self.build_dir,"Ortho4XP_"+FNAMES.short_latlon(self.lat,self.lon)+".cfg")
             if not os.path.isfile(config_file):
                 config_file=os.path.join(self.build_dir,"Ortho4XP.cfg")
@@ -185,9 +184,8 @@ class Tile():
             UI.lvprint(0,"CFG error: Could not read config file for tile",FNAMES.short_latlon(self.lat,self.lon))
             return 0
 
-
     def write_to_config(self,config_file=None):
-        if not config_file: 
+        if not config_file:
             config_file=os.path.join(self.build_dir,"Ortho4XP_"+FNAMES.short_latlon(self.lat,self.lon)+".cfg")
         try:
             f=open(config_file,'w')
@@ -199,14 +197,14 @@ class Tile():
             UI.vprint(2,e)
             UI.lvprint(0,"CFG error: Could not write config file for tile",FNAMES.short_latlon(self.lat,self.lon))
             return 0
-        
+
 ############################################################################################
 
 ############################################################################################
 class Ortho4XP_Config(tk.Toplevel):
 
     def __init__(self,parent):
-        
+
         tk.Toplevel.__init__(self)
         self.option_add("*Font", "TkFixedFont")
         self.title('Ortho4XP Config')
@@ -216,11 +214,10 @@ class Ortho4XP_Config(tk.Toplevel):
             self.pady=5
         else:
             self.pady=1
- 
 
         # Ortho4XP main window reference
         self.parent=parent
-                 
+
         # Frames
         self.main_frame       =  tk.Frame(self, border=4,\
                                  relief=RIDGE,bg='light green')
@@ -237,7 +234,7 @@ class Ortho4XP_Config(tk.Toplevel):
         self.main_frame.grid(row=0,column=0,sticky=N+S+W+E)
         self.frame_cfg.grid(row=0,column=0,pady=10,sticky=N+S+E+W)
         self.frame_lastbtn.grid(row=1,column=0,pady=10,sticky=N+S+E+W)
-        
+
         # Variables and widgets and their placement
         self.v_={}
         for item in cfg_vars: self.v_[item]=tk.StringVar()
@@ -250,62 +247,61 @@ class Ortho4XP_Config(tk.Toplevel):
             tk.Label(self.frame_cfg,text=title,bg='light green',anchor=W,font="TKFixedFont 14").grid(row=0,column=col,columnspan=2,pady=(0,10),sticky=N+S+E+W)
             row=1
             for item in sub_list:
-                text=item if 'short_name' not in cfg_vars[item] else cfg_vars[item]['short_name'] 
+                text=item if 'short_name' not in cfg_vars[item] else cfg_vars[item]['short_name']
                 ttk.Button(self.frame_cfg,text=text,takefocus=False,command=lambda item=item: self.popup(item,cfg_vars[item]['hint'])).grid(row=row,column=col,padx=2,pady=2,sticky=E+W+N+S)
                 if cfg_vars[item]['type']==bool or 'values' in cfg_vars[item]:
                     values=[True,False] if cfg_vars[item]['type']==bool else [str(x) for x in cfg_vars[item]['values']]
                     self.entry_[item]=ttk.Combobox(self.frame_cfg,values=values,textvariable=self.v_[item],width=6,state='readonly',style='O4.TCombobox')
                 else:
-                    self.entry_[item]=ttk.Entry(self.frame_cfg,textvariable=self.v_[item],width=7) 
+                    self.entry_[item]=ttk.Entry(self.frame_cfg,textvariable=self.v_[item],width=7)
                 self.entry_[item].grid(row=row,column=col+1,padx=(0,20),pady=2,sticky=N+S+W)
                 row+=1
             next_row=max(next_row,row)
             col+=2
         row=next_row
-        
+
         self.frame_dem.grid(row=row,column=0,columnspan=6,sticky=N+S+W+E)
         item='custom_dem'
         ttk.Button(self.frame_dem,text=item,takefocus=False,command=lambda item=item: self.popup(item,cfg_vars[item]['hint'])).grid(row=0,column=0,padx=2,pady=2,sticky=E+W)
-        #self.entry_[item]=tk.Entry(self.frame_dem,textvariable=self.v_[item],bg='white',fg='blue',width=80) 
-        values=DEM.available_sources[1::2] 
+        #self.entry_[item]=tk.Entry(self.frame_dem,textvariable=self.v_[item],bg='white',fg='blue',width=80)
+        values=DEM.available_sources[1::2]
         self.entry_[item]=ttk.Combobox(self.frame_dem,values=values,textvariable=self.v_[item],width=80,style='O4.TCombobox')
         self.entry_[item].grid(row=0,column=1,padx=(2,0),pady=8,sticky=N+S+W+E)
         ttk.Button(self.frame_dem,image=self.folder_icon,command=self.choose_dem,style='Flat.TButton').grid(row=0,column=2, padx=2, pady=0,sticky=W)
         item='fill_nodata'
         ttk.Button(self.frame_cfg,text=item,takefocus=False,command=lambda item=item: self.popup(item,cfg_vars[item]['hint'])).grid(row=row,column=6,padx=2,pady=2,sticky=E+W)
-        values=[True,False] 
+        values=[True,False]
         self.entry_[item]=ttk.Combobox(self.frame_cfg,values=values,textvariable=self.v_[item],width=6,state='readonly',style='O4.TCombobox')
         self.entry_[item].grid(row=row,column=7,padx=2,pady=2,sticky=W)
         row+=1
-        
+
         ttk.Separator(self.frame_cfg,orient=tk.HORIZONTAL).grid(row=row,column=0,columnspan=8,sticky=N+S+E+W); row+=1
         tk.Label(self.frame_cfg,text="Application ",bg='light green',anchor=W,font="TKFixedFont 14").grid(row=row,column=0,columnspan=4,pady=10,sticky=N+S+E+W); row+=1
-        
+
         l=ceil((len(gui_app_vars_short))/4)
         this_row=row
         j=0
         for item in gui_app_vars_short:
             col=2*(j//l)
             row=this_row+j%l
-            text=item if 'short_name' not in cfg_vars[item] else cfg_vars[item]['short_name'] 
-            ttk.Button(self.frame_cfg,text=text,takefocus=False,command=lambda item=item: self.popup(item,cfg_vars[item]['hint'])).grid(row=row,column=col,padx=2,pady=2,sticky=E+W+N+S)  
+            text=item if 'short_name' not in cfg_vars[item] else cfg_vars[item]['short_name']
+            ttk.Button(self.frame_cfg,text=text,takefocus=False,command=lambda item=item: self.popup(item,cfg_vars[item]['hint'])).grid(row=row,column=col,padx=2,pady=2,sticky=E+W+N+S)
             if cfg_vars[item]['type']==bool or 'values' in cfg_vars[item]:
                 values=['True','False'] if cfg_vars[item]['type']==bool else [str(x) for x in cfg_vars[item]['values']]
                 self.entry_[item]=ttk.Combobox(self.frame_cfg,values=values,textvariable=self.v_[item],width=6,state='readonly',style='O4.TCombobox')
             else:
-                self.entry_[item]=tk.Entry(self.frame_cfg,textvariable=self.v_[item],width=7,bg='white',fg='blue') 
+                self.entry_[item]=tk.Entry(self.frame_cfg,textvariable=self.v_[item],width=7,bg='white',fg='blue')
             self.entry_[item].grid(row=row,column=col+1,padx=(0,20),pady=2,sticky=N+S+W)
             j+=1
-        
+
         row=this_row+l
 
         for item in gui_app_vars_long:
-            ttk.Button(self.frame_cfg,text=item,takefocus=False,command=lambda item=item: self.popup(item,cfg_vars[item]['hint'])).grid(row=row,column=0,padx=2,pady=2,sticky=E+W+N+S)  
-            self.entry_[item]=tk.Entry(self.frame_cfg,textvariable=self.v_[item],bg='white',fg='blue') 
+            ttk.Button(self.frame_cfg,text=item,takefocus=False,command=lambda item=item: self.popup(item,cfg_vars[item]['hint'])).grid(row=row,column=0,padx=2,pady=2,sticky=E+W+N+S)
+            self.entry_[item]=tk.Entry(self.frame_cfg,textvariable=self.v_[item],bg='white',fg='blue')
             self.entry_[item].grid(row=row,column=1,columnspan=5,padx=(2,0),pady=2,sticky=N+S+E+W)
             ttk.Button(self.frame_cfg,image=self.folder_icon,command=lambda item=item: self.choose_dir(item),style='Flat.TButton').grid(row=row,column=6, padx=2, pady=0,sticky=N+S+W)
             row+=1
-
 
         self.button1= ttk.Button(self.frame_lastbtn, text='Load Tile Cfg ',command= self.load_tile_cfg)
         self.button1.grid(row=0,column=0,padx=5,pady=self.pady,sticky=N+S+E+W)
@@ -325,8 +321,6 @@ class Ortho4XP_Config(tk.Toplevel):
         self.v_['default_zl']=parent.default_zl
         self.load_interface_from_variables()
 
-         
-
     def load_interface_from_variables(self):
         for var in cfg_vars:
             target=cfg_vars[var]['module']+"."+var if 'module' in cfg_vars[var] else var
@@ -340,13 +334,13 @@ class Ortho4XP_Config(tk.Toplevel):
         tmp=filedialog.askdirectory(parent=self)
         if tmp: self.v_[item].set(str(tmp))
 
-    
+
     def load_tile_cfg(self):
         try: (lat,lon)=self.parent.get_lat_lon()
         except: return 0
         custom_build_dir=self.parent.custom_build_dir_entry.get()
         build_dir=FNAMES.build_dir(lat,lon,custom_build_dir)
-        try: 
+        try:
             f=open(os.path.join(build_dir,'Ortho4XP_'+FNAMES.short_latlon(lat,lon)+'.cfg'),'r')
         except:
             try:
@@ -383,7 +377,7 @@ class Ortho4XP_Config(tk.Toplevel):
             f.write(var+"="+self.v_[var].get()+'\n')
         f.close()
         return
-      
+
     def load_global_cfg(self):
         try: f=open(os.path.join(FNAMES.Ortho4XP_dir,'Ortho4XP.cfg'),'r')
         except: return 0
@@ -401,12 +395,12 @@ class Ortho4XP_Config(tk.Toplevel):
                 pass
         f.close()
         return
-    
+
     def write_global_cfg(self):
         old_cfg=os.path.join(FNAMES.Ortho4XP_dir,'Ortho4XP.cfg.bak')
         new_cfg=os.path.join(FNAMES.Ortho4XP_dir,'Ortho4XP.cfg')
         if os.path.isfile(old_cfg):
-            try: os.remove(old_cfg) 
+            try: os.remove(old_cfg)
             except: pass
         try: os.rename(new_cfg,old_cfg)
         except: pass
@@ -433,7 +427,7 @@ class Ortho4XP_Config(tk.Toplevel):
                 exec(target+"=cfg_vars['"+var+"']['type'](cfg_vars['"+var+"']['default'])")
                 errors.append(var)
         if errors:
-            error_text="The following variables had wrong type\nand were reset to their default value!\n\n* "+'\n* '.join(errors) 
+            error_text="The following variables had wrong type\nand were reset to their default value!\n\n* "+'\n* '.join(errors)
             self.popup("ERROR",error_text)
 
     def popup(self,header,input_text):
@@ -443,7 +437,7 @@ class Ortho4XP_Config(tk.Toplevel):
         ttk.Label(self.popupwindow, text=input_text,wraplength=600,anchor=W).pack(side="top", fill="x", padx=5,pady=0)
         ttk.Button(self.popupwindow, text="Ok", command = self.popupwindow.destroy).pack(pady=5)
         return
-    
-    
+
+
 
 
