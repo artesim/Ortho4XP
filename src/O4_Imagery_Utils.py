@@ -260,8 +260,8 @@ def initialize_providers_dict():
                     provider['request_type']='tms'
                     provider['tile_size']=256
                     provider['epsg_code']='3857'
-                    provider['top_left_corner']=[[-20037508.34, 20037508.34] for i in range(0,21)]
-                    provider['resolutions']=numpy.array([20037508.34/(128*2**i) for i in range(0,21)])
+                    provider['top_left_corner']=[[-20037508.34, 20037508.34] for i in range(0,22)]
+                    provider['resolutions']=numpy.array([20037508.34/(128*2**i) for i in range(0,22)])
                 providers_dict[provider_code]=provider
             else:
                 UI.vprint("Error in reading provider definition file for",file_name)
