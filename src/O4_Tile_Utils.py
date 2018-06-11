@@ -179,6 +179,9 @@ def remove_unwanted_textures(tile):
 ##############################################################################
 
 def smart_zone_list(list_lat_lon, screen_res, fov, fpa, provider, max_zl, min_zl, greediness=1, greediness_threshold=0.70):
+    def _provider_for(_zl):
+        return 'GO2' if max_zl > 19 and zl > 17 else provider
+
     tiles_to_build = [XPlaneTile(lat, lon) for (lat, lon) in list_lat_lon]
     airport_collection = AirportDataSource().airports_in(tiles_to_build, include_surrounding_tiles=True)
 
@@ -198,7 +201,7 @@ def smart_zone_list(list_lat_lon, screen_res, fov, fpa, provider, max_zl, min_zl
                     coords = []
                     for (x, y) in polygon.exterior.coords:
                         coords.extend([y, x])
-                    tile_zones.append([coords, zl, provider])
+                    tile_zones.append([coords, zl, _provider_for(zl)])
         all_zones.append(tile_zones)
     return all_zones
 
