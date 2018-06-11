@@ -601,7 +601,7 @@ def get_wmts_image(tilematrix,til_x,til_y,provider,http_session):
         til_y=til_y//2
         tilematrix-=1
         down_sample+=1 
-        print("downsample",down_sample)
+        # print("downsample",down_sample)
         if down_sample>=6:
             return (0,Image.new('RGB',(width,height),'white'))
     else:
