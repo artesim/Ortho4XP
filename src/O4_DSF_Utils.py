@@ -181,8 +181,11 @@ def create_terrain_file(tile,texture_file_name,til_x_left,til_y_top,zoomlevel,pr
                +'{:.5f}'.format(lon_med)+' '+str(texture_approx_size)+' '+str(4096//2**(zoomlevel-tile.mask_zl))+'\n')
             f.write('BORDER_TEX ../textures/'+FNAMES.mask_file(til_x_left,til_y_top,zoomlevel,provider_code)+'\n')
         else: #land
-            if tile.use_decal_on_terrain:
-                f.write('DECAL_LIB lib/g10/decals/maquify_1_green_key.dcl\n')
+            if (tile.use_decal_on_terrain or
+                    texture_file_name.endswith('19.dds') or
+                    texture_file_name.endswith('20.dds') or
+                    texture_file_name.endswith('21.dds')):
+                f.write('DECAL_LIB lib/g10/decals/shrub_and_dirt_1.dcl\n')
             if not tile.terrain_casts_shadows:
                 f.write('NO_SHADOW\n')
         return ter_file_name
