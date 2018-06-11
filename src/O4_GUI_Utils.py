@@ -994,31 +994,29 @@ class Ortho4XP_Earth_Preview(tk.Toplevel):
                         lon=int(file_name[3:7])
                     except:
                         continue
-                    [x0,y0]=GEO.wgs84_to_pix(lat+1,lon,self.earthzl)
-                    [x1,y1]=GEO.wgs84_to_pix(lat,lon+1,self.earthzl)
-                    color='blue'
-                    content=''
-                    try:
-                        tmpf=open(os.path.join(self.working_dir,'Ortho4XP_'+FNAMES.short_latlon(lat,lon)+'.cfg'),'r')
-                        found_config=True
-                    except:
-                        found_config=False
-                    if found_config:
-                        prov=zl=''
-                        for line in tmpf.readlines():
-                            if line[:15]=='default_website':
-                                prov=line.split('=')[1][:-1]
-                            elif line[:10]=='default_zl':
-                                zl=int(line.split('=')[1][:-1])
-                                break
-                        tmpf.close()
-                        if (prov and zl):
-                            color=dico_color[zl]
-                            content=prov+'\n'+str(zl)
-                            self.dico_tiles_done[(lat,lon)]=(
-                                self.canvas.create_rectangle(x0,y0,x1,y1,fill=color,stipple='gray12'),
-                                self.canvas.create_text((x0+x1)//2,(y0+y1)//2,justify=CENTER,text=content)
-                                )
+
+                    [x0, y0] = GEO.wgs84_to_pix(lat + 1, lon, self.earthzl)
+                    [x1, y1] = GEO.wgs84_to_pix(lat, lon + 1, self.earthzl)
+                    tile_cfg_path = os.path.join(self.working_dir, 'Ortho4XP_' + FNAMES.short_latlon(lat, lon) + '.cfg')
+                    if os.path.exists(tile_cfg_path):
+                        with open(tile_cfg_path) as tile_cfg:
+                            prov = zl = ''
+                            for line in tile_cfg.readlines():
+                                if line[:15] == 'default_website':
+                                    prov = line.split('=')[1][:-1]
+                                elif line[:10] == 'default_zl':
+                                    zl = int(line.split('=')[1][:-1])
+                                    break
+
+                            if prov and zl:
+                                color = ZoomLevels.tkinter_color_of(zl)
+                                content = prov + '\n' + str(zl)
+                                self.dico_tiles_done[(lat, lon)] = (
+                                    self.canvas.create_rectangle(x0, y0, x1, y1, fill=color, stipple='gray12'),
+                                    self.canvas.create_text((x0 + x1) // 2,
+                                                            (y0 + y1) // 2,
+                                                            justify=CENTER,
+                                                            text=content))
 
             link=os.path.join(CFG.xplane_install_dir,'Custom Scenery','zOrtho4XP_'+os.path.basename(self.working_dir))
             if os.path.isdir(link):
