@@ -36,6 +36,10 @@ def long_latlon(lat,lon):
     strlatround='{:+.0f}'.format(floor(lat/10)*10).zfill(3)
     strlonround='{:+.0f}'.format(floor(lon/10)*10).zfill(4)
     return os.path.join(strlatround+strlonround,strlat+strlon)
+def hem_latlon(lat,lon):
+    hemisphere='N' if lat>=0 else 'S'
+    greenwichside='E' if lon>=0 else 'W'
+    return hemisphere+'{:.0f}'.format(abs(lat)).zfill(2)+greenwichside+'{:.0f}'.format(abs(lon)).zfill(3)
 ##############################################################################
 
 def tile_dir(lat,lon):
@@ -76,7 +80,10 @@ def output_poly_file(tile):
 def output_ele_file(tile):
     return os.path.join(tile.build_dir,'Data'+short_latlon(tile.lat,tile.lon)+'.'+str(tile.iterate+1)+'.ele')
 def alt_file(tile):
-    return os.path.join(tile.build_dir,'Data'+short_latlon(tile.lat,tile.lon)+'.alt')
+    if tile.iterate:
+        return os.path.join(tile.build_dir,'Data'+short_latlon(tile.lat,tile.lon)+'.'+str(tile.iterate)+'.alt')
+    else:
+        return os.path.join(tile.build_dir,'Data'+short_latlon(tile.lat,tile.lon)+'.alt')
 def apt_file(tile):
     return os.path.join(tile.build_dir,'Data'+short_latlon(tile.lat,tile.lon)+'.apt')
 def weight_file(tile):
@@ -97,8 +104,12 @@ def preview(lat, lon, zoomlevel, provider_code):
 ##############################################################################
 def custom_coastline(lat, lon):
     return os.path.join(OSM_dir,long_latlon(lat,lon),short_latlon(lat,lon)+'_custom_coastline.osm.bz2')
+def custom_coastline_dir(lat, lon):
+    return os.path.join(OSM_dir,long_latlon(lat,lon),'custom_coastline')    
 def custom_water(lat, lon):
     return os.path.join(OSM_dir,long_latlon(lat,lon),short_latlon(lat,lon)+'_custom_water.osm.bz2')
+def custom_water_dir(lat, lon):
+    return os.path.join(OSM_dir,long_latlon(lat,lon),'custom_water')
 def osm_cached(lat, lon, cached_suffix):
     return os.path.join(OSM_dir,long_latlon(lat,lon),short_latlon(lat,lon)+'_'+cached_suffix+'.osm.bz2')
 def osm_old_cached(lat, lon, query):
@@ -108,10 +119,7 @@ def osm_old_cached(lat, lon, query):
 
 ##############################################################################
 def base_file_name(lat, lon):
-    hemisphere='N' if lat>=0 else 'S'
-    greenwichside='E' if lon>=0 else 'W'
-    file_name=hemisphere+'{:.0f}'.format(abs(lat)).zfill(2)+greenwichside+'{:.0f}'.format(abs(lon)).zfill(3)
-    return os.path.join(Elevation_dir,round_latlon(lat,lon),file_name)
+    return os.path.join(Elevation_dir,round_latlon(lat,lon),hem_latlon(lat,lon))
 ##############################################################################
 
 ##############################################################################
@@ -127,7 +135,6 @@ def elevation_data(source,lat, lon):
     elif source=='NED1':
         return os.path.join(Elevation_dir,long_latlon(lat,lon)+'_NED1','w001001.adf') 
 ##############################################################################
-
 
 ##############################################################################
 def generic_tif(lat, lon):

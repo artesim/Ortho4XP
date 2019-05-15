@@ -1,5 +1,5 @@
 from math import ceil, sqrt, atan2
-import numpy
+import numpy 
 from shapely import geometry, affinity
 from shapely import ops
 from rtree import index
@@ -38,7 +38,7 @@ scaly=1
 ##############################################################################
 class Vector_Map():
     
-    dico_attributes = {'DUMMY':0,'WATER':1,'SEA':2,'SEA_EQUIV':4,'RUNWAY':8,'INTERP_ALT':16,'HANGAR':32}
+    dico_attributes = {'DUMMY':0,'WATER':1,'SEA':2,'SEA_EQUIV':4,'INTERP_ALT':8,'RUNWAY':16,'TAXIWAY':32,'APRON':64,'HANGAR':128}
     def __init__(self):
         self.dico_nodes={}  # keys are tuples of 2 floats (in our case (lon-base_lon), lat-base_lat) and values are ints (ids)  
         self.dico_edges={}  # keys are tuples of 2 ints (end-points ids) and values are ints (ids). An egde id is needed for the index (bbox)
@@ -287,7 +287,45 @@ class Vector_Map():
                 if UI.red_flag: return 0
         return 1
         
-    
+    def snap_to_grid(self,digits):
+        next_node_id=1
+        next_edge_id=1
+        dico_nodes_new={}
+        dico_edges_new={}
+        nodes_dico_new={}
+        edges_dico_new={}
+        data_nodes_new={}  
+        data_edges_new={}
+        dico_old_to_new={}
+        for key in self.dico_nodes:
+            key_new=(round(key[0],digits),round(key[1],digits))
+            if key_new in dico_nodes_new:
+                idx_new =dico_nodes_new[key_new]
+            else:
+                idx_new=next_node_id
+                dico_nodes_new[key_new]=idx_new
+                next_node_id+=1
+                nodes_dico_new[idx_new]=key_new
+                data_nodes_new[idx_new]=self.data_nodes[self.dico_nodes[key]]
+            dico_old_to_new[self.dico_nodes[key]]=idx_new
+        for (id0,id1) in self.dico_edges:
+            (id0n,id1n)=(dico_old_to_new[id0],dico_old_to_new[id1])
+            if id0n==id1n: continue
+            if (id0n,id1n) in dico_edges_new:
+                eid=dico_edges_new[(id0n,id1n)]
+                data_edges_new[eid]=  data_edges_new[eid] | self.data_edges[self.dico_edges[(id0,id1)]] # bitwise add new marker if necessary
+            elif (id1n,id0n) in dico_edges_new:
+                eid=dico_edges_new[(id1n,id0n)]
+                data_edges_new[eid]=  data_edges_new[eid] | self.data_edges[self.dico_edges[(id0,id1)]] # bitwise add new marker if necessary
+            else:
+                dico_edges_new[(id0n,id1n)]=next_edge_id
+                edges_dico_new[next_edge_id]=(id0n,id1n)
+                data_edges_new[next_edge_id]=  self.data_edges[self.dico_edges[(id0,id1)]] 
+                next_edge_id+=1
+        UI.vprint(2,"Simplified ",len(self.dico_nodes)-len(dico_nodes_new),"duplicate nodes and",len(self.dico_edges)-len(dico_edges_new),"zero length edges.")
+        (self.dico_nodes,self.nodes_dico,self.dico_edges,self.edges_dico,self.data_nodes,self.data_edges)=(dico_nodes_new,nodes_dico_new,dico_edges_new,edges_dico_new,data_nodes_new,data_edges_new)        
+        
+        
 
     def write_node_file(self,node_file_name): 
         # note that Triangle4XP too is writing a(nother) node file, which as more node attributes
@@ -295,7 +333,7 @@ class Vector_Map():
         f= open(node_file_name,'w')
         f.write(str(total_nodes)+' 2 1 0\n')
         for idx in sorted(self.nodes_dico.keys()):
-            f.write(str(idx)+' '+' '.join(['{:.17f}'.format(x) for x in (self.nodes_dico[idx][0],self.nodes_dico[idx][1],self.data_nodes[idx])])+'\n')
+            f.write(str(idx)+' '+' '.join(['{:.15f}'.format(x) for x in (self.nodes_dico[idx][0],self.nodes_dico[idx][1],self.data_nodes[idx])])+'\n')
         f.close() 
     
     def write_poly_file(self,poly_file_name): 
@@ -311,7 +349,7 @@ class Vector_Map():
         f.write('\n'+str(len(self.holes))+'\n')
         idx=1
         for hole in self.holes:        
-            f.write(str(idx)+' '+' '.join(['{:.17f}'.format(h) for h in hole])+'\n')
+            f.write(str(idx)+' '+' '.join(['{:.15f}'.format(h) for h in hole])+'\n')
             idx+=1
         total_seeds=numpy.sum([len(self.seeds[key]) for key in self.seeds])
         if total_seeds==0:
@@ -323,7 +361,7 @@ class Vector_Map():
                 (key,marker)=long_key
                 if key not in self.seeds: continue
                 for seed in self.seeds[key]:
-                    f.write(str(idx)+' '+' '.join(['{:.17f}'.format(s) for s in seed])+' '+str(marker)+'\n')
+                    f.write(str(idx)+' '+' '.join(['{:.15f}'.format(s) for s in seed])+' '+str(marker)+'\n')
                     idx+=1
         f.close()
         return 
@@ -487,20 +525,24 @@ def indexed_difference(idx_pol1,dico_pol1,idx_pol2,dico_pol2):
     return idx_out,dico_out
 ##############################################################################
 ##############################################################################
-def coastline_to_MultiPolygon(coastline,lat,lon):
+def coastline_to_MultiPolygon(coastline,lat,lon,custom_source=False):
     ######################################################################
     def encode_to_next(coord,new_way,remove_coords):
+        UI.vprint(3,"Computing next  coord for",coord)
         if coord in inits:
+            UI.vprint(3,"    This is an init one")
             idx=inits.index(coord)
             new_way+=segments[idx][2]
-            UI.vprint(3,segments[idx][2][0],segments[idx][2][-1])
             next_coord=segments[idx][1]
+            UI.vprint(3,"    End one is",next_coord)
             remove_coords.append(coord)
             remove_coords.append(next_coord)
         else:
+            UI.vprint(3,"    This is and end one")
             idx=bdcoords.index(coord)                
             if idx<len(bdcoords)-1: 
                next_coord=bdcoords[idx+1] 
+               UI.vprint(3,"    The following one is",next_coord) 
                next_coord_loop=next_coord
             else:
                next_coord=bdcoords[0]
@@ -508,7 +550,7 @@ def coastline_to_MultiPolygon(coastline,lat,lon):
             interp_coord=ceil(coord)
             while interp_coord<next_coord_loop:
                 new_way+=bd_point(interp_coord) 
-                UI.vprint(3,bd_point(interp_coord))
+                UI.vprint(3,"Interp coord",bd_point(interp_coord))
                 interp_coord+=1
         return next_coord               
     ######################################################################
@@ -524,7 +566,7 @@ def coastline_to_MultiPolygon(coastline,lat,lon):
     osm_badpoints=[]
     for line in coastline.geoms:
         if line.is_ring:
-            if geometry.LinearRing(line).is_ccw:
+            if custom_source or geometry.LinearRing(line).is_ccw:
                 islands.append(list(line.coords)) 
             else:
                 interior_seas.append(list(line.coords)) 
@@ -540,10 +582,12 @@ def coastline_to_MultiPolygon(coastline,lat,lon):
             ends.append(bd_coord(tmp[-1]))
             inits.append(bd_coord(tmp[0]))
     if osm_error:
-        UI.lvprint(1,"ERROR is OSM coastline data. Coastline abruptly stops at",osm_badpoints)
+        UI.lvprint(1,"ERROR in OSM coastline data. Coastline abruptly stops at",osm_badpoints)
         return geometry.MultiPolygon()
     bdcoords=sorted(ends+inits)
-    UI.vprint(3,bdcoords)
+    UI.vprint(3,"bdcoords=",bdcoords)
+    UI.vprint(3,"inits=",ends)
+    UI.vprint(3,"ends=",inits)
     while bdcoords:
         UI.vprint(3,"new loop")
         new_way=[]
@@ -553,12 +597,12 @@ def coastline_to_MultiPolygon(coastline,lat,lon):
         count=0
         while next_coord!=first_coord:
            count+=1
+           UI.vprint(3,next_coord)
            next_coord=encode_to_next(next_coord,new_way,remove_coords)  
            if count==1000: # dead loop caused by faulty osm coastline data   
                UI.lvprint(1,"ERROR is OSM coastline data, probably caused by a coastline way with wrong orientation.")
                return geometry.MultiPolygon()
         bdpolys.append(new_way)
-        UI.vprint(3,new_way)
         for coord in remove_coords:
             try:
                 bdcoords.remove(coord)
@@ -690,6 +734,20 @@ def least_square_fit_altitude_along_way(way,steps,dem,weights=False):
         return (linestring,numpy.polyfit(numpy.arange(steps+1)/steps,tmp,7,w=w))
 
 ##############################################################################
+
+##############################################################################
+#def spline_fit_altitude_along_way(way,steps,dem,weights=False):
+#    linestring=affinity.affine_transform(geometry.LineString(way), [scalx,0,0,1,0,0])
+#    tmp=dem.alt_vec(numpy.array(geometry.LineString([linestring.interpolate(x,normalized=True) for x in numpy.arange(steps+1)/steps])*numpy.array([1/scalx,1])))
+#    if not weights:
+#        return (linestring,scipy.interpolate.splrep(numpy.arange(steps+1)/steps,tmp,s=0))
+#    else:
+#        w=(numpy.maximum(numpy.arange(steps+1),steps-numpy.arange(steps+1))+steps//2)**2
+#        w/=numpy.sum(w)
+#        return (linestring,scipy.interpolate.splrep(numpy.arange(steps+1)/steps,tmp,w=w))
+#
+##############################################################################
+
 ##############################################################################
 def weighted_alt(node,alt_idx,alt_dico,dem):
     eps1=0.003
@@ -703,6 +761,7 @@ def weighted_alt(node,alt_idx,alt_dico,dem):
         dist=pt.distance(linestring)*GEO.lat_to_m 
         weight=numpy.exp(-dist/(2*width))
         alti+=numpy.polyval(leastsquarefit,linestring.project(pt,normalized=True))*weight
+        #alti+=scipy.interpolate.splev(linestring.project(pt,normalized=True),splinefit,der=0)*weight
         weights+=weight
     if weights<1e-6:
         return dem.alt(node)

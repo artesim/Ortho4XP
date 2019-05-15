@@ -4,7 +4,9 @@ import os
 import pickle
 import subprocess
 import numpy
+import requests
 from math import sqrt, cos, pi
+import O4_DEM_Utils as DEM
 import O4_UI_Utils as UI
 import O4_File_Names as FNAMES
 import O4_Geo_Utils as GEO
@@ -15,12 +17,73 @@ import O4_Version
 if 'dar' in sys.platform:
     Triangle4XP_cmd = os.path.join(FNAMES.Utils_dir,"Triangle4XP.app ")
     triangle_cmd    = os.path.join(FNAMES.Utils_dir,"triangle.app ")
+    sort_mesh_cmd   = os.path.join(FNAMES.Utils_dir,"moulinette.app ")
+    unzip_cmd       = "7z "
 elif 'win' in sys.platform: 
     Triangle4XP_cmd = os.path.join(FNAMES.Utils_dir,"Triangle4XP.exe ")
     triangle_cmd    = os.path.join(FNAMES.Utils_dir,"triangle.exe ")
+    sort_mesh_cmd   = os.path.join(FNAMES.Utils_dir,"moulinette.exe ")
+    unzip_cmd       = os.path.join(FNAMES.Utils_dir,"7z.exe ")
 else:
     Triangle4XP_cmd = os.path.join(FNAMES.Utils_dir,"Triangle4XP ")
     triangle_cmd    = os.path.join(FNAMES.Utils_dir,"triangle ")
+    sort_mesh_cmd   = os.path.join(FNAMES.Utils_dir,"moulinette ")
+    unzip_cmd       = "7z "
+
+
+community_server=False
+if os.path.exists(os.path.join(FNAMES.Ortho4XP_dir,"community_server.txt")):
+    try:
+        f=open(os.path.join(FNAMES.Ortho4XP_dir,"community_server.txt"),'r')
+        for line in f.readlines():
+            line=line.strip()
+            if not line: continue
+            if '#' in line:
+               if line[0]=='#': continue
+               else: line=line.split('#')[0].strip()
+            if not line: continue
+            community_server=True
+            community_prefix=line
+            break
+    except:
+        pass
+
+def community_mesh(tile):
+    if not community_server:
+        UI.exit_message_and_bottom_line("\nERROR: No community server defined in community_server.txt")
+        return 0
+    url=community_prefix+os.path.basename(FNAMES.mesh_file(tile.build_dir,tile.lat,tile.lon))+'.7z'
+    timer=time.time()
+    UI.vprint(0,"Querying",url,"...")
+    try:
+        r=requests.get(url,timeout=30)
+        if '[200]' in str(r):
+            UI.vprint(0,"We've got something !")
+            f=open(FNAMES.mesh_file(tile.build_dir,tile.lat,tile.lon)+'.7z','wb')
+            f.write(r.content)
+            f.close()
+            if subprocess.call([unzip_cmd.strip(),'e','-y','-o'+tile.build_dir,FNAMES.mesh_file(tile.build_dir,tile.lat,tile.lon)+".7z"]):
+                UI.exit_message_and_bottom_line("\nERROR: Could not extract community_mesh from archive.")
+                return 0
+            os.remove(FNAMES.mesh_file(tile.build_dir,tile.lat,tile.lon)+'.7z')
+            UI.timings_and_bottom_line(timer)
+            return 1
+        elif '[40' in str(r):
+            UI.exit_message_and_bottom_line("\nSORRY: Community server does not propose that mesh: "+str(r))
+            return 0
+        elif '[50' in str(r):
+            UI.exit_message_and_bottom_line("\nSORRY: Community server seems to be down or struggling: "+str(r))
+            return 0
+        else:
+            UI.exit_message_and_bottom_line("\nSORRY: Community server seems to be down or struggling: "+str(r))
+            return 0
+    except Exception as e:
+        UI.exit_message_and_bottom_line("\nERROR: Network or server unreachable:\n"+str(e))
+        return 0
+        
+        
+        
+
 
 ##############################################################################
 def is_in_region(lat,lon,latmin,latmax,lonmin,lonmax):
@@ -50,10 +113,22 @@ def build_curv_tol_weight_map(tile,weight_array):
     if tile.coast_curv_tol!=tile.curvature_tol:
         UI.vprint(1,"-> Modifying curv_tol weight map according to coastline location.")
         sea_layer=OSM.OSM_layer()
-        queries=['way["natural"="coastline"]']    
-        tags_of_interest=[]
-        if not OSM.OSM_queries_to_OSM_layer(queries,sea_layer,tile.lat,tile.lon,tags_of_interest,cached_suffix='coastline'):
-            return 0
+        custom_coastline=FNAMES.custom_coastline(tile.lat, tile.lon)
+        custom_coastline_dir=FNAMES.custom_coastline_dir(tile.lat, tile.lon)
+        if os.path.isfile(custom_coastline):
+            UI.vprint(1,"    * User defined custom coastline data detected.")
+            sea_layer.update_dicosm(custom_coastline,input_tags=None,target_tags=None)
+        elif os.path.isdir(custom_coastline_dir):
+            UI.vprint(1,"    * User defined custom coastline data detected (multiple files).")
+            for osm_file in os.listdir(custom_coastline_dir):
+                UI.vprint(2,"      ",osm_file)
+                sea_layer.update_dicosm(os.path.join(custom_coastline_dir,osm_file),input_tags=None,target_tags=None)
+                sea_layer.write_to_file(custom_coastline)
+        else:
+            queries=['way["natural"="coastline"]']    
+            tags_of_interest=[]
+            if not OSM.OSM_queries_to_OSM_layer(queries,sea_layer,tile.lat,tile.lon,tags_of_interest,cached_suffix='coastline'):
+                return 0
         for nodeid in sea_layer.dicosmn:
             (lonp,latp)=[float(x) for x in sea_layer.dicosmn[nodeid]]
             if lonp<tile.lon or lonp>tile.lon+1 or latp<tile.lat or latp>tile.lat+1: continue
@@ -89,16 +164,13 @@ def post_process_nodes_altitudes(tile):
     water_tris=set()
     sea_tris=set()
     interp_alt_tris=set()
-    runway_tris=set()
     for i in range(nbr_tri):
         line = f_ele.readline()
         # triangle attributes are powers of 2, except for the dummy attributed which doesn't require post-treatment
         if line[-2]=='0': continue  
         (v1,v2,v3,attr)=[int(x)-1 for x in line.split()[1:5]]
         attr+=1
-        if attr & dico_attributes['RUNWAY']: 
-            runway_tris.add((v1,v2,v3))
-        elif attr & dico_attributes['INTERP_ALT']: 
+        if attr >= dico_attributes['INTERP_ALT']: 
             interp_alt_tris.add((v1,v2,v3))
         elif attr & dico_attributes['SEA']:
             sea_tris.add((v1,v2,v3))
@@ -128,10 +200,16 @@ def post_process_nodes_altitudes(tile):
                 vertices[6*v2+2]=max(vertices[6*v2+2],0)
                 vertices[6*v3+2]=max(vertices[6*v3+2],0)
     UI.vprint(1,"   Treatment of airports, roads and patches.")
-    for (v1,v2,v3) in (interp_alt_tris | runway_tris):
+    for (v1,v2,v3) in interp_alt_tris:
             vertices[6*v1+2]=vertices[6*v1+5]
             vertices[6*v2+2]=vertices[6*v2+5]
             vertices[6*v3+2]=vertices[6*v3+5]
+            vertices[6*v1+3]=0
+            vertices[6*v2+3]=0
+            vertices[6*v3+3]=0
+            vertices[6*v1+4]=0
+            vertices[6*v2+4]=0
+            vertices[6*v3+4]=0
     UI.vprint(1,"-> Writing output nodes file.")        
     f_node = open(FNAMES.output_node_file(tile),'w')
     f_node.write(init_line_f_node)
@@ -154,15 +232,15 @@ def write_mesh_file(tile,vertices):
     f.write("Vertices\n")
     f.write(str(nbr_vert)+"\n")
     for i in range(0,nbr_vert):
-        f.write('{:.9f}'.format(vertices[6*i]+tile.lon)+" "+\
-                '{:.9f}'.format(vertices[6*i+1]+tile.lat)+" "+\
-                '{:.9f}'.format(vertices[6*i+2]/100000)+" 0\n") 
+        f.write('{:.7f}'.format(vertices[6*i]+tile.lon)+" "+\
+                '{:.7f}'.format(vertices[6*i+1]+tile.lat)+" "+\
+                '{:.7f}'.format(vertices[6*i+2]/100000)+" 0\n") 
     f.write("\n")
     f.write("Normals\n")
     f.write(str(nbr_vert)+"\n")
     for i in range(0,nbr_vert):
-        f.write('{:.9f}'.format(vertices[6*i+3])+" "+\
-                '{:.9f}'.format(vertices[6*i+4])+"\n")
+        f.write('{:.2f}'.format(vertices[6*i+3])+" "+\
+                '{:.2f}'.format(vertices[6*i+4])+"\n")
     f.write("\n")
     f.write("Triangles\n")
     f.write(str(nbr_tri)+"\n")
@@ -275,28 +353,52 @@ def build_mesh(tile):
     UI.red_flag=False  
     VECT.scalx=cos((tile.lat+0.5)*pi/180)  
     UI.logprint("Step 2 for tile lat=",tile.lat,", lon=",tile.lon,": starting.")
-    UI.vprint(0,"\nStep 2 : Building mesh tile "+FNAMES.short_latlon(tile.lat,tile.lon)+" : \n--------\n")
+    UI.vprint(0,"\nStep 2 : Building mesh for tile "+FNAMES.short_latlon(tile.lat,tile.lon)+" : \n--------\n")
     UI.progress_bar(1,0)
     poly_file    = FNAMES.input_poly_file(tile)
     node_file    = FNAMES.input_node_file(tile)
     alt_file     = FNAMES.alt_file(tile)
     weight_file  = FNAMES.weight_file(tile)
-    for file in (poly_file,node_file,alt_file):
-        if not os.path.isfile(file):
-            UI.exit_message_and_bottom_line("\nERROR: Could not find ",file)
-            return 0
+    if not os.path.isfile(node_file):
+        UI.exit_message_and_bottom_line("\nERROR: Could not find ",node_file)
+        return 0
+    if not tile.iterate and not os.path.isfile(poly_file):
+        UI.exit_message_and_bottom_line("\nERROR: Could not find ",poly_file)
+        return 0
     if not tile.iterate:
-        tile.ensure_elevation_data(info_only=True)
-        if not  os.path.getsize(alt_file)==4*tile.dem.nxdem*tile.dem.nydem:
-            UI.exit_message_and_bottom_line("\nERROR: Cached raster elevation does not match the current custom DEM specs.\n       You must run Step 1 and Step 2 with the same elevation base.")
+        if not os.path.isfile(alt_file):
+            UI.exit_message_and_bottom_line("\nERROR: Could not find",alt_file,". You must run Step 1 first.")
+            return 0
+        try:
+            fill_nodata = tile.fill_nodata or "to zero"
+            source= ((";" in tile.custom_dem) and tile.custom_dem.split(";")[0]) or tile.custom_dem
+            tile.dem=DEM.DEM(tile.lat,tile.lon,source,fill_nodata,info_only=True)
+            if not  os.path.getsize(alt_file)==4*tile.dem.nxdem*tile.dem.nydem:
+                UI.exit_message_and_bottom_line("\nERROR: Cached raster elevation does not match the current custom DEM specs.\n       You must run Step 1 and Step 2 with the same elevation base.")
+                return 0
+        except Exception as e:
+            print(e)
+            UI.exit_message_and_bottom_line("\nERROR: Could not determine the appropriate source. Please check your custom_dem entry.")
             return 0
     else:
-        tile.ensure_elevation_data()
-        tile.dem.write_to_file(FNAMES.alt_file(tile))
-            
-    f=open(node_file,'r')
-    input_nodes=int(f.readline().split()[0])
-    f.close()
+        try:
+            source= ((";" in tile.custom_dem) and tile.custom_dem.split(";")[tile.iterate]) or tile.custom_dem
+            tile.dem=DEM.DEM(tile.lat,tile.lon,source,fill_nodata=False,info_only=True)
+            if not os.path.isfile(alt_file) or not os.path.getsize(alt_file)==4*tile.dem.nxdem*tile.dem.nydem:
+                tile.dem=DEM.DEM(tile.lat,tile.lon,source,fill_nodata=False,info_only=False)
+                tile.dem.write_to_file(FNAMES.alt_file(tile))
+        except Exception as e:
+            print(e)
+            UI.exit_message_and_bottom_line("\nERROR: Could not determine the appropriate source. Please check your custom_dem entry.")
+            return 0
+    try:
+        f=open(node_file,'r')
+        input_nodes=int(f.readline().split()[0])
+        f.close()
+    except:
+        UI.exit_message_and_bottom_line("\nERROR: In reading ",node_file)
+        return 0
+        
     timer=time.time()
     tri_verbosity = 'Q' if UI.verbosity<=1 else 'V'
     output_poly   = 'P' if UI.cleaning_level else ''
@@ -326,6 +428,8 @@ def build_mesh(tile):
               '{:.9g}'.format(tile.curvature_tol*curv_tol_scaling),
               '{:.9g}'.format(tile.min_angle),str(hmin_effective),alt_file,weight_file,poly_file]
     
+    del(tile.dem) # for machines with not much RAM, we do not need it anymore
+    tile.dem=None
     UI.vprint(1,"-> Start of the mesh algorithm Triangle4XP.")
     UI.vprint(2,'   Mesh command:',' '.join(mesh_cmd))
     fingers_crossed=subprocess.Popen(mesh_cmd,stdout=subprocess.PIPE,bufsize=0)
@@ -334,14 +438,34 @@ def build_mesh(tile):
         if not line: 
             break
         else:
-            print(line.decode("utf-8")[:-1])
+            try:
+                print(line.decode("utf-8")[:-1])
+            except:
+                pass
+    time.sleep(0.3)
     fingers_crossed.poll()        
     if fingers_crossed.returncode:
-        UI.exit_message_and_bottom_line("\nERROR: Triangle4XP crashed !\n\n"+\
+        UI.vprint(0,"\nWARNING: Triangle4XP could not achieve the requested quality (min_angle), most probably due to an uncatched OSM error.\n"+\
+                    "It will be tempted now with no angle constraint (i.e. min_angle=0).")
+        mesh_cmd[-5]='{:.9g}'.format(0)
+        fingers_crossed=subprocess.Popen(mesh_cmd,stdout=subprocess.PIPE,bufsize=0)
+        while True:
+            line = fingers_crossed.stdout.readline()
+            if not line: 
+                break
+            else:
+                try:
+                    print(line.decode("utf-8")[:-1])
+                except:
+                    pass
+        time.sleep(0.3)
+        fingers_crossed.poll()
+        if fingers_crossed.returncode:
+            UI.exit_message_and_bottom_line("\nERROR: Triangle4XP really couldn't make it !\n\n"+\
                                         "If the reason is not due to the limited amount of RAM please\n"+\
-                                        "file a bug including the .node and .poly files for that you\n"+\
+                                        "file a bug including the .node and .poly files that you\n"+\
                                         "will find in "+str(tile.build_dir)+".\n")
-        return 0
+            return 0
         
     if UI.red_flag: UI.exit_message_and_bottom_line(); return 0
     
@@ -368,6 +492,30 @@ def build_mesh(tile):
     
     UI.timings_and_bottom_line(timer)
     UI.logprint("Step 2 for tile lat=",tile.lat,", lon=",tile.lon,": normal exit.")
+    return 1
+##############################################################################
+
+##############################################################################
+def sort_mesh(tile):
+    if UI.is_working: return 0
+    UI.is_working=1
+    UI.red_flag=False  
+    mesh_file = FNAMES.mesh_file(tile.build_dir,tile.lat,tile.lon)
+    if not os.path.isfile(mesh_file):
+        UI.exit_message_and_bottom_line("\nERROR: Could not find ",mesh_file)
+        return 0
+    sort_mesh_cmd_list=[sort_mesh_cmd.strip(),str(tile.default_zl),mesh_file]
+    UI.vprint(1,"-> Reorganizing mesh triangles.")
+    timer=time.time()
+    moulinette=subprocess.Popen(sort_mesh_cmd_list,stdout=subprocess.PIPE,bufsize=0)
+    while True:
+        line = moulinette.stdout.readline()
+        if not line: 
+            break
+        else:
+            print(line.decode("utf-8")[:-1])
+    UI.timings_and_bottom_line(timer)
+    UI.logprint("Moulinette applied for tile lat=",tile.lat,", lon=",tile.lon," and ZL",tile.default_zl)
     return 1
 ##############################################################################
 

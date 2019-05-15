@@ -11,7 +11,7 @@ import tkinter as tk
 from   tkinter import RIDGE,N,S,E,W,NW,ALL,END,LEFT,RIGHT,CENTER,HORIZONTAL,filedialog
 import tkinter.ttk as ttk
 from PIL import Image, ImageTk
-import O4_Version
+import O4_Version 
 import O4_Imagery_Utils as IMG
 import O4_File_Names as FNAMES
 import O4_Geo_Utils as GEO
@@ -23,6 +23,8 @@ import O4_Tile_Utils as TILE
 import O4_UI_Utils as UI
 import O4_Config_Utils as CFG
 
+# Set OsX=True if you prefer the OsX way of drawing existing tiles but are on Linux or Windows.
+OsX='dar' in sys.platform
 
 class ZoomLevels:
     """Container class for Zoom Level constants, colors and utilities :
@@ -70,11 +72,11 @@ class ZoomLevels:
         return super(ZoomLevels, cls).__new__(cls, *args, **kwargs)
 
     @classmethod
-    def normalized(cls, zl):
+    def normalized(cls, zl, min_zl=None, max_zl=None):
         """Ensure the provided ZL is between __ZL_MIN__ and __ZL_MAX."""
         return max(min(int(zl) + 1,
-                       cls.__ZL_MAX__),
-                   cls.__ZL_MIN__)
+                       max_zl or cls.__ZL_MAX__),
+                   min_zl or cls.__ZL_MIN__)
 
     @staticmethod
     def _heat_map(cold_zls, temperate_zls, warm_zls, blazing_zls):
@@ -124,9 +126,7 @@ class Ortho4XP_GUI(tk.Tk):
         # Let UI know ourself
         UI.gui=self
         # Initialize providers combobox entries
-        self.map_list= sorted([provider_code for provider_code in list(IMG.providers_dict) if IMG.providers_dict[provider_code]['directory']=='Global'])+\
-                       sorted(list(IMG.combined_providers_dict))+\
-                       sorted([provider_code for provider_code in list(IMG.providers_dict) if IMG.providers_dict[provider_code]['directory']!='Global'])
+        self.map_list= sorted([provider_code for provider_code in set(IMG.providers_dict) if IMG.providers_dict[provider_code]['in_GUI']]+sorted(set(IMG.combined_providers_dict)))
         try: self.map_list.remove('OSM')
         except: pass
         try: self.map_list.remove('SEA')
@@ -207,8 +207,15 @@ class Ortho4XP_GUI(tk.Tk):
         for i in range(5):
             self.frame_steps.columnconfigure(i,weight=1)
         ttk.Button(self.frame_steps, text="Assemble Vector data",command=self.build_poly_file).grid(row=0,column=0, padx=5, pady=0,sticky=N+S+E+W)
-        ttk.Button(self.frame_steps, text="Triangulate 3D Mesh",command=self.build_mesh).grid(row=0,column=1, padx=5, pady=0,sticky=N+S+E+W)
-        ttk.Button(self.frame_steps, text=" Draw Water Masks  ",command=self.build_masks).grid(row=0,column=2, padx=5, pady=0,sticky=N+S+E+W)
+        build_mesh_button=ttk.Button(self.frame_steps, text="Triangulate 3D Mesh")#,command=self.build_mesh)
+        build_mesh_button.grid(row=0,column=1, padx=5, pady=0,sticky=N+S+E+W)
+        build_mesh_button.bind("<ButtonPress-1>", self.build_mesh)
+        build_mesh_button.bind("<Shift-ButtonPress-1>", self.sort_mesh)
+        build_mesh_button.bind("<Control-ButtonPress-1>", self.community_mesh)
+        build_masks_button=ttk.Button(self.frame_steps, text=" Draw Water Masks  ")#,command=self.build_masks)
+        build_masks_button.grid(row=0,column=2, padx=5, pady=0,sticky=N+S+E+W)
+        build_masks_button.bind("<ButtonPress-1>", self.build_masks)
+        build_masks_button.bind("<Shift-ButtonPress-1>", self.build_masks) 
         ttk.Button(self.frame_steps, text=" Build Imagery/DSF ",command=self.build_tile).grid(row=0,column=3, padx=5, pady=0,sticky=N+S+E+W)
         ttk.Button(self.frame_steps, text="    All in one     ",command=self.build_all).grid(row=0,column=4, padx=5, pady=0,sticky=N+S+E+W)
 
@@ -253,7 +260,11 @@ class Ortho4XP_GUI(tk.Tk):
             self.custom_build_dir.set(custom_build_dir)
             f.close()
         except:
-            pass
+            self.lat.set(48)
+            self.lon.set(-6)
+            self.default_website.set('BI')
+            self.default_zl.set(16)
+            self.custom_build_dir.set('')
 
     # GUI methods
     def write(self,line):
@@ -286,6 +297,9 @@ class Ortho4XP_GUI(tk.Tk):
         self.callback_pgrb=self.after(100, self.pgrb_update)
 
     def tile_change(self,*args):
+        # HACK : user preference is to not trash custom_dem and zone_list on tile change.
+        # Instead added a new shortcut for trashing all high zl list in the custom ZL window at once.
+        return
         CFG.custom_dem=''
         try:
             self.config_window.v_['custom_dem'].set('')
@@ -297,7 +311,7 @@ class Ortho4XP_GUI(tk.Tk):
         if self.default_website.get(): CFG.default_website=str(self.default_website.get())
         if self.default_zl.get(): CFG.default_zl=int(self.default_zl.get())
 
-    def get_lat_lon(self):
+    def get_lat_lon(self,check=True):
         error_string=''
         try:
             lat=int(self.lat.get())
@@ -311,9 +325,11 @@ class Ortho4XP_GUI(tk.Tk):
                 error_string+="Longitude out of range (-180,179)."
         except:
             error_string+="Longitude wrongly encoded."
-        if error_string:
+        if error_string and check:
             UI.vprint(0,"Error: "+error_string)
             return None
+        elif error_string:
+            return (48,-6)
         return (lat,lon)
 
     def tile_from_interface(self):
@@ -332,7 +348,7 @@ class Ortho4XP_GUI(tk.Tk):
         self.working_thread=threading.Thread(target=VMAP.build_poly_file,args=[tile])
         self.working_thread.start()
 
-    def build_mesh(self):
+    def build_mesh(self,event):
         try:
             tile=self.tile_from_interface()
             tile.make_dirs()
@@ -340,14 +356,33 @@ class Ortho4XP_GUI(tk.Tk):
             UI.vprint(1,"Process aborted.\n"); return 0
         self.working_thread=threading.Thread(target=MESH.build_mesh,args=[tile])
         self.working_thread.start()
+        
+    def sort_mesh(self,event):
+        try: 
+            tile=self.tile_from_interface()
+            tile.make_dirs()
+        except: 
+            UI.vprint(1,"Process aborted.\n"); return 0
+        self.working_thread=threading.Thread(target=MESH.sort_mesh,args=[tile])
+        self.working_thread.start()
+        
+    def community_mesh(self,event):
+        try: 
+            tile=self.tile_from_interface()
+            tile.make_dirs()
+        except: 
+            UI.vprint(1,"Process aborted.\n"); return 0
+        self.working_thread=threading.Thread(target=MESH.community_mesh,args=[tile])
+        self.working_thread.start()
 
-    def build_masks(self):
+    def build_masks(self,event):
+        for_imagery="Shift" in str(event) or "shift" in str(event)
         try:
             tile=self.tile_from_interface()
             tile.make_dirs()
         except:
             UI.vprint(1,"Process aborted.\n"); return 0
-        self.working_thread=threading.Thread(target=MASK.build_masks,args=[tile])
+        self.working_thread=threading.Thread(target=MASK.build_masks,args=[tile,for_imagery])
         self.working_thread.start()
 
     def build_tile(self):
@@ -388,8 +423,8 @@ class Ortho4XP_GUI(tk.Tk):
             self.earth_window.lift()
             return 1
         except:
-            try: (lat,lon)=self.get_lat_lon()
-            except: return 0
+            try: (lat,lon)=self.get_lat_lon(check=False)
+            except: (lat,lon)=(48,-6)
             self.earth_window=Ortho4XP_Earth_Preview(self,lat,lon)
             return 1
 
@@ -433,22 +468,15 @@ class Ortho4XP_Custom_ZL(tk.Toplevel):
         self.parent=parent
         self.lat=lat
         self.lon=lon
-        self.map_list= sorted([provider_code for provider_code in list(IMG.providers_dict) if IMG.providers_dict[provider_code]['directory']=='Global'])+\
-                       sorted(list(IMG.combined_providers_dict))+\
-                       sorted([provider_code for provider_code in list(IMG.providers_dict) if IMG.providers_dict[provider_code]['directory']!='Global'])
-        try: self.map_list.remove('SEA')
-        except: pass
-        self.reduce_map_list=self.map_list[:]
-        try: self.reduced_map_list.remove('OSM')
-        except: pass
-
+        self.map_list= sorted([provider_code for provider_code in set(IMG.providers_dict) if IMG.providers_dict[provider_code]['in_GUI']]+sorted(set(IMG.combined_providers_dict)))
+        
         self.map_list=[provider_code for provider_code in self.map_list if provider_code!='SEA']
         self.reduced_map_list=[provider_code for provider_code in self.map_list if provider_code!='OSM']
         self.points=[]
         self.coords=[]
         self.polygon_list=[]
         self.polyobj_list=[]
-
+        
         tk.Toplevel.__init__(self)
         self.title('Preview / Custom zoomlevels')
         self.columnconfigure(1,weight=1)
@@ -465,7 +493,10 @@ class Ortho4XP_Custom_ZL(tk.Toplevel):
         self.zmap_choice.set(self.parent.default_website.get())
 
         self.zlpol=tk.IntVar()
-        self.zlpol.set(ZOOM_LEVELS.normalized(self.parent.default_zl.get()))
+        try: # default_zl might still be empty 
+            self.zlpol.set(ZOOM_LEVELS.normalized(self.parent.default_zl.get()), min_zl=15)
+        except:
+            self.zlpol.set(17)
         self.gb = tk.StringVar()
         self.gb.set('0Gb')
 
@@ -522,8 +553,9 @@ class Ortho4XP_Custom_ZL(tk.Toplevel):
         ttk.Button(self.frame_left,text='Make GeoTiffs',command=self.build_geotiffs_ifc).grid(row=row,column=0,padx=5,pady=3,sticky=N+S+E+W); row+=1
         ttk.Button(self.frame_left,text='Extract Mesh ',command=self.extract_mesh_ifc).grid(row=row,column=0,padx=5,pady=3,sticky=N+S+E+W); row+=1
         tk.Label(self.frame_left,text="Ctrl+B1 : add texture\nShift+B1: add zone point\nCtrl+B2 : delete zone",bg="light green",justify=LEFT).grid(row=row,column=0,padx=5,pady=20,sticky=N+S+E+W); row+=1
-        ttk.Button(self.frame_left,text='   Abandon   ',command=self.destroy).grid(row=row,column=0,padx=5,pady=3,sticky=N+S+E+W); row+=1
-        ttk.Button(self.frame_left,text='Save and Exit',command=self.save_zone_list).grid(row=row,column=0,padx=5,pady=3,sticky=N+S+E+W); row+=1
+        ttk.Button(self.frame_left,text='    Apply    ',command=self.save_zone_list).grid(row=row,column=0,padx=5,pady=3,sticky=N+S+E+W); row+=1
+        ttk.Button(self.frame_left,text='    Reset    ',command=self.delAll).grid(row=row,column=0,padx=5,pady=3,sticky=N+S+E+W); row+=1
+        ttk.Button(self.frame_left,text='    Exit     ',command=self.destroy).grid(row=row,column=0,padx=5,pady=3,sticky=N+S+E+W); row+=1
         self.canvas = tk.Canvas(self.frame_right,bd=0,height=750,width=750)
         self.canvas.grid(row=0,column=0,sticky=N+S+E+W)
 
@@ -573,6 +605,7 @@ class Ortho4XP_Custom_ZL(tk.Toplevel):
             self.canvas.bind("<ButtonPress-3>", self.scroll_start)
             self.canvas.bind("<B3-Motion>", self.scroll_move)
             self.canvas.bind("<Control-ButtonPress-3>",self.delPol)
+        self.canvas.bind("<ButtonPress-1>",lambda event: self.canvas.focus_set())
         self.canvas.bind("<Shift-ButtonPress-1>",self.newPoint)
         self.canvas.bind("<Control-Shift-ButtonPress-1>",self.newPointGrid)
         self.canvas.bind("<Control-ButtonPress-1>",self.newPol)
@@ -598,7 +631,7 @@ class Ortho4XP_Custom_ZL(tk.Toplevel):
 
         def _tmp_smart_zones_list():
             return TILE.smart_zone_list_1(tile_lat_lon=(self.lat, self.lon),
-                                          screen_res=TILE.ScreenRes.OcculusRift,
+                                          screen_res=TILE.ScreenRes.res_1440p,
                                           fov=60,
                                           fpa=10,
                                           provider='GO2',
@@ -710,6 +743,20 @@ class Ortho4XP_Custom_ZL(tk.Toplevel):
                 self.canvas.delete(self.polyobj_list[idx])
                 self.polyobj_list.pop(idx)
         return
+        
+    def delAll(self):
+        copy=self.polygon_list[:]
+        for poly in copy:
+            idx=self.polygon_list.index(poly)
+            self.polygon_list.pop(idx)
+            self.canvas.delete(self.polyobj_list[idx])
+            self.polyobj_list.pop(idx)
+        try:
+            self.canvas.delete(self.poly_curr)
+        except:
+            pass
+        self.compute_size()
+        return        
 
     def xy_to_latlon(self,x,y,zoomlevel):
         pix_x=x+self.xmin
@@ -815,12 +862,12 @@ class Ortho4XP_Custom_ZL(tk.Toplevel):
         for item in ordered_list:
             tmp=[]
             for pt in item[1]:
-                tmp.append(pt) #float('{:.3f}'.format(float(pt))))
+                tmp.append(pt) 
             for pt in item[1][0:2]:     # repeat first point for point_in_polygon algo
-                tmp.append(pt) #float('{:.3f}'.format(float(pt))))
+                tmp.append(pt) 
             zone_list.append([tmp,item[2],item[3]])
         CFG.zone_list=zone_list
-        self.destroy()
+        #self.destroy()    
         return
 ############################################################################################
 
@@ -895,9 +942,9 @@ class Ortho4XP_Earth_Preview(tk.Toplevel):
         # Exit
         ttk.Button(self.frame_left,text='      Exit      ',command=self.exit).grid(row=row,column=0,padx=5,pady=5,sticky=N+S+E+W)
         row+=1
-        #tk.Label(self.frame_left,text="Shortcuts :\n-------------------\nB2-press+hold=move map\nB1-double-click=select active lat/lon\nShift+B1=add for batch build\nCtrl+B1= link in Custom Scenery\n\nActive lat/lon\n---------------------",
-        #         bg="light green").grid(row=row,column=0,padx=5,pady=5,sticky=N+S+E+W)
-        #row+=1
+        tk.Label(self.frame_left,text="Shortcuts :\n-----------------\nB2-press+hold=move map\nB1-double-click=select active\nShift+B1=add to batch build\nCtrl+B1=link in Custom Scenery",
+                 bg="light green").grid(row=row,column=0,padx=0,pady=5,sticky=N+S+E+W)
+        row+=1
 
         self.canvas  =  tk.Canvas(self.frame_right,bd=0)
         self.canvas.grid(row=0,column=0,sticky=N+S+E+W)
@@ -921,7 +968,12 @@ class Ortho4XP_Earth_Preview(tk.Toplevel):
         self.canvas.bind("<Control-ButtonPress-1>",self.toggle_to_custom)
         self.canvas.focus_set()
         self.draw_canvas(self.nx0,self.ny0)
-
+        self.active_lat=lat 
+        self.active_lon=lon 
+        self.latlon.set(FNAMES.short_latlon(self.active_lat,self.active_lon))        
+        [x0,y0]=GEO.wgs84_to_pix(self.active_lat+1,self.active_lon,self.earthzl)
+        [x1,y1]=GEO.wgs84_to_pix(self.active_lat,self.active_lon+1,self.earthzl)
+        self.active_tile=self.canvas.create_rectangle(x0,y0,x1,y1,fill='',outline='yellow',width=3)
         self.threaded_preview()
         return
 
@@ -941,17 +993,19 @@ class Ortho4XP_Earth_Preview(tk.Toplevel):
     def preview_existing_tiles(self):
         if self.dico_tiles_done:
             for tile in self.dico_tiles_done:
-                for objid in self.dico_tiles_done[tile]:
+                for objid in self.dico_tiles_done[tile][:2]:
                     self.canvas.delete(objid)
             self.dico_tiles_done={}
         if not self.grouped:
             for dir_name in os.listdir(self.working_dir):
-                if "zOrtho4XP_" in dir_name:
+                if "XP_" in dir_name:
                     try:
-                        lat=int(dir_name[-7:-4])
-                        lon=int(dir_name[-4:])
+                        lat=int(dir_name.split("XP_")[1][:3])
+                        lon=int(dir_name.split("XP_")[1][3:7])
                     except:
                         continue
+                    # With the enlarged accepetance rule for directory name there might be more than one tile for the same (lat,lon), we skip all but the first encountered.    
+                    if (lat,lon) in self.dico_tiles_done: continue                      
                     [x0,y0]=GEO.wgs84_to_pix(lat+1,lon,self.earthzl)
                     [x1,y1]=GEO.wgs84_to_pix(lat,lon+1,self.earthzl)
                     if os.path.isfile(os.path.join(self.working_dir,dir_name,"Earth nav data",FNAMES.long_latlon(lat,lon)+'.dsf')):
@@ -970,23 +1024,31 @@ class Ortho4XP_Earth_Preview(tk.Toplevel):
                             prov=zl=''
                             for line in tmpf.readlines():
                                 if line[:15]=='default_website':
-                                    prov=line.split('=')[1][:-1]
+                                    prov=line.strip().split('=')[1][:4]
                                 elif line[:10]=='default_zl':
-                                    zl=int(line.split('=')[1][:-1])
+                                    zl=int(line.strip().split('=')[1])
                                     break
                             tmpf.close()
-                            if (prov and zl):
+                            if not prov: prov='?'
+                            if zl:
                                 color=ZOOM_LEVELS.tkinter_color_of[zl]
-                                content=prov+'\n'+str(zl)
-                        self.dico_tiles_done[(lat,lon)]=(
-                                self.canvas.create_rectangle(x0,y0,x1,y1,fill=color,stipple='gray12'),
-                                self.canvas.create_text((x0+x1)//2,(y0+y1)//2,justify=CENTER,text=content)
+                            else:
+                                zl='?'
+                            content=prov+'\n'+str(zl)
+                        else:
+                            content='?'
+                        self.dico_tiles_done[(lat,lon)]=(\
+                                self.canvas.create_rectangle(x0,y0,x1,y1,fill=color,stipple='gray12') if not OsX else self.canvas.create_rectangle(x0,y0,x1,y1,outline='black'),\
+                                self.canvas.create_text((x0+x1)//2,(y0+y1)//2,justify=CENTER,text=content,fill='black',font=('Helvetica','12','normal')),\
+                                dir_name\
                                 )
                         link=os.path.join(CFG.xplane_install_dir,'Custom Scenery','zOrtho4XP_'+FNAMES.short_latlon(lat,lon))
                         if os.path.isdir(link):
-                            if os.path.samefile(os.path.realpath(link),os.path.realpath(os.path.join(self.working_dir,'zOrtho4XP_'+FNAMES.short_latlon(lat,lon)))):
-                                self.canvas.itemconfig(self.dico_tiles_done[(lat,lon)][0],stipple='gray50')
-
+                            if os.path.samefile(os.path.realpath(link),os.path.realpath(os.path.join(self.working_dir,dir_name))):
+                                if not OsX:
+                                    self.canvas.itemconfig(self.dico_tiles_done[(lat,lon)][0],stipple='gray50')
+                                else:
+                                    self.canvas.itemconfig(self.dico_tiles_done[(lat,lon)][1],font=('Helvetica','12','bold underline'))
         elif self.grouped and os.path.isdir(os.path.join(self.working_dir,'Earth nav data')):
             for dir_name in os.listdir(os.path.join(self.working_dir,'Earth nav data')):
                 for file_name in os.listdir(os.path.join(self.working_dir,'Earth nav data',dir_name)):
@@ -995,39 +1057,54 @@ class Ortho4XP_Earth_Preview(tk.Toplevel):
                         lon=int(file_name[3:7])
                     except:
                         continue
-
-                    [x0, y0] = GEO.wgs84_to_pix(lat + 1, lon, self.earthzl)
-                    [x1, y1] = GEO.wgs84_to_pix(lat, lon + 1, self.earthzl)
-                    tile_cfg_path = os.path.join(self.working_dir, 'Ortho4XP_' + FNAMES.short_latlon(lat, lon) + '.cfg')
-                    if os.path.exists(tile_cfg_path):
-                        with open(tile_cfg_path) as tile_cfg:
-                            prov = zl = ''
-                            for line in tile_cfg.readlines():
-                                if line[:15] == 'default_website':
-                                    prov = line.split('=')[1][:-1]
-                                elif line[:10] == 'default_zl':
-                                    zl = int(line.split('=')[1][:-1])
-                                    break
-
-                            if prov and zl:
-                                color = ZoomLevels.tkinter_color_of(zl)
-                                content = prov + '\n' + str(zl)
-                                self.dico_tiles_done[(lat, lon)] = (
-                                    self.canvas.create_rectangle(x0, y0, x1, y1, fill=color, stipple='gray12'),
-                                    self.canvas.create_text((x0 + x1) // 2,
-                                                            (y0 + y1) // 2,
-                                                            justify=CENTER,
-                                                            text=content))
-
+                    [x0,y0]=GEO.wgs84_to_pix(lat+1,lon,self.earthzl)
+                    [x1,y1]=GEO.wgs84_to_pix(lat,lon+1,self.earthzl)
+                    color='blue'
+                    content=''
+                    try:
+                        tmpf=open(os.path.join(self.working_dir,'Ortho4XP_'+FNAMES.short_latlon(lat,lon)+'.cfg'),'r')
+                        found_config=True
+                    except:
+                        found_config=False
+                    if found_config:                        
+                        prov=zl=''
+                        for line in tmpf.readlines():
+                            if line[:15]=='default_website':
+                                prov=line.strip().split('=')[1][:4]
+                            elif line[:10]=='default_zl':
+                                zl=int(line.strip().split('=')[1])
+                                break
+                        tmpf.close()
+                        if not prov: prov='?'
+                        if zl:
+                            color=ZoomLevels.tkinter_color_of(zl)
+                        else:
+                            zl='?'
+                        content=prov+'\n'+str(zl)
+                    else:
+                        content='?'
+                    self.dico_tiles_done[(lat,lon)]=(\
+                                self.canvas.create_rectangle(x0,y0,x1,y1,fill=color,stipple='gray12') if not OsX else self.canvas.create_rectangle(x0,y0,x1,y1,outline='black'),\
+                                self.canvas.create_text((x0+x1)//2,(y0+y1)//2,justify=CENTER,text=content,fill='black',font=('Helvetica','12','normal')),\
+                                dir_name\
+                                )
             link=os.path.join(CFG.xplane_install_dir,'Custom Scenery','zOrtho4XP_'+os.path.basename(self.working_dir))
             if os.path.isdir(link):
                 if os.path.samefile(os.path.realpath(link),os.path.realpath(self.working_dir)):
                     for (lat0,lon0) in self.dico_tiles_done:
-                        self.canvas.itemconfig(self.dico_tiles_done[(lat0,lon0)][0],stipple='gray50')
+                        if 'dar' not in sys.platform:
+                            self.canvas.itemconfig(self.dico_tiles_done[(lat,lon)][0],stipple='gray50')
+                        else:
+                            self.canvas.itemconfig(self.dico_tiles_done[(lat,lon)][1],font=('Helvetica','12','bold underline'))
+        for (lat,lon) in self.dico_tiles_todo:
+            [x0,y0]=GEO.wgs84_to_pix(lat+1,lon,self.earthzl)
+            [x1,y1]=GEO.wgs84_to_pix(lat,lon+1,self.earthzl)
+            self.canvas.delete(self.dico_tiles_todo[(lat,lon)]) 
+            self.dico_tiles_todo[(lat,lon)]=self.canvas.create_rectangle(x0,y0,x1,y1,fill='red',stipple='gray12') if not OsX else self.canvas.create_rectangle(x0,y0,x1,y1,outline='red',width=2)
         return
-
+    
     def trash(self):
-        if self.v_['OSM data'].get():
+        if self.v_['OSM data'].get(): 
             try: shutil.rmtree(FNAMES.osm_dir(self.active_lat,self.active_lon))
             except Exception as e:
                 UI.vprint(3,e)
@@ -1044,7 +1121,7 @@ class Ortho4XP_Earth_Preview(tk.Toplevel):
             except Exception as e:
                 UI.vprint(3,e)
             if (self.active_lat,self.active_lon) in self.dico_tiles_done:
-                for objid in self.dico_tiles_done[(self.active_lat,self.active_lon)]:
+                for objid in self.dico_tiles_done[(self.active_lat,self.active_lon)][:2]:
                     self.canvas.delete(objid)
                 del(self.dico_tiles_done[(self.active_lat,self.active_lon)])
         if self.v_['Tile (textures)'].get() and not self.grouped:
@@ -1079,18 +1156,25 @@ class Ortho4XP_Earth_Preview(tk.Toplevel):
             return
         if not self.grouped:
             link=os.path.join(CFG.xplane_install_dir,'Custom Scenery','zOrtho4XP_'+FNAMES.short_latlon(lat,lon))
-            target=os.path.realpath(os.path.join(self.working_dir,'zOrtho4XP_'+FNAMES.short_latlon(lat,lon)))
-            if os.path.isdir(link) and os.path.samefile(os.path.realpath(link),os.path.realpath(os.path.join(self.working_dir,'zOrtho4XP_'+FNAMES.short_latlon(lat,lon)))):
+            #target=os.path.realpath(os.path.join(self.working_dir,'zOrtho4XP_'+FNAMES.short_latlon(lat,lon)))
+            target=os.path.realpath(os.path.join(self.working_dir,self.dico_tiles_done[(lat,lon)][-1]))
+            if os.path.isdir(link) and os.path.samefile(os.path.realpath(link),target):
                 os.remove(link)
-                self.canvas.itemconfig(self.dico_tiles_done[(lat,lon)][0],stipple='gray12')
-                return
-        elif self.grouped:
+                if not OsX:
+                    self.canvas.itemconfig(self.dico_tiles_done[(lat,lon)][0],stipple='gray12')
+                else:
+                    self.canvas.itemconfig(self.dico_tiles_done[(lat,lon)][1],font=('Helvetica','12','normal'))
+                return 
+        elif self.grouped: 
             link=os.path.join(CFG.xplane_install_dir,'Custom Scenery','zOrtho4XP_'+os.path.basename(self.working_dir))
             target=os.path.realpath(self.working_dir)
             if os.path.isdir(link) and os.path.samefile(os.path.realpath(link),os.path.realpath(self.working_dir)):
                 os.remove(link)
                 for (lat0,lon0) in self.dico_tiles_done:
-                    self.canvas.itemconfig(self.dico_tiles_done[(lat0,lon0)][0],stipple='gray12')
+                    if not OsX:
+                        self.canvas.itemconfig(self.dico_tiles_done[(lat,lon)][0],stipple='gray12')
+                    else:
+                        self.canvas.itemconfig(self.dico_tiles_done[(lat,lon)][1],font=('Helvetica','12','normal'))
                 return
         # in case this was a broken link        
         try: os.remove(link)
@@ -1100,11 +1184,17 @@ class Ortho4XP_Earth_Preview(tk.Toplevel):
         else:
             os.system('MKLINK /J "'+link+'" "'+target+'"')
         if not self.grouped:
-            self.canvas.itemconfig(self.dico_tiles_done[(lat,lon)][0],stipple='gray50')
+            if not OsX:
+                self.canvas.itemconfig(self.dico_tiles_done[(lat,lon)][0],stipple='gray50')
+            else:
+                self.canvas.itemconfig(self.dico_tiles_done[(lat,lon)][1],font=('Helvetica','12','bold underline'))
         else:
             for (lat0,lon0) in self.dico_tiles_done:
-                self.canvas.itemconfig(self.dico_tiles_done[(lat0,lon0)][0],stipple='gray50')
-        return
+                if not OsX:
+                    self.canvas.itemconfig(self.dico_tiles_done[(lat0,lon0)][0],stipple='gray50')    
+                else:
+                    self.canvas.itemconfig(self.dico_tiles_done[(lat,lon)][1],font=('Helvetica','12','bold underline'))
+        return 
 
     def add_tile(self,event):
         x=self.canvas.canvasx(event.x)
@@ -1113,9 +1203,12 @@ class Ortho4XP_Earth_Preview(tk.Toplevel):
         if (lat,lon) not in self.dico_tiles_todo:
             [x0,y0]=GEO.wgs84_to_pix(lat+1,lon,self.earthzl)
             [x1,y1]=GEO.wgs84_to_pix(lat,lon+1,self.earthzl)
-            self.dico_tiles_todo[(lat,lon)]=self.canvas.create_rectangle(x0,y0,x1,y1,fill='red',stipple='gray12')
+            if not OsX:
+                self.dico_tiles_todo[(lat,lon)]=self.canvas.create_rectangle(x0,y0,x1,y1,fill='red',stipple='gray12') 
+            else:
+                self.dico_tiles_todo[(lat,lon)]=self.canvas.create_rectangle(x0+2,y0+2,x1-2,y1-2,outline='red',width=1)
         else:
-            self.canvas.delete(self.dico_tiles_todo[(lat,lon)])
+            self.canvas.delete(self.dico_tiles_todo[(lat,lon)]) 
             self.dico_tiles_todo.pop((lat,lon),None)
         return
 

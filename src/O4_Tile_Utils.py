@@ -40,7 +40,6 @@ def download_textures(tile,download_queue,convert_queue):
     return 1
 ##############################################################################
 
-
 ##############################################################################
 def build_tile(tile):
     if UI.is_working: return 0
@@ -58,7 +57,9 @@ def build_tile(tile):
 
     tile.write_to_config()
 
-    IMG.initialize_local_combined_providers_dict(tile)
+    if not IMG.initialize_local_combined_providers_dict(tile): 
+        UI.exit_message_and_bottom_line('')
+        return 0
 
     try:
         if not os.path.exists(os.path.join(tile.build_dir,'Earth nav data',FNAMES.round_latlon(tile.lat,tile.lon))):
@@ -103,6 +104,12 @@ def build_tile(tile):
                 UI.vprint(1,"DDS conversion process interrupted.")
             elif dico_conv_progress['done']>=1:
                 UI.vprint(1," *DDS conversion of textures completed.")
+    UI.vprint(1," *Activating DSF file.")
+    dsf_file_name=os.path.join(tile.build_dir,'Earth nav data',FNAMES.long_latlon(tile.lat,tile.lon)+'.dsf')
+    try:
+        os.rename(dsf_file_name+'.tmp',dsf_file_name)
+    except:
+        UI.vprint(0,"ERROR : could not rename DSF file, tile is not actived.")
     if UI.red_flag: UI.exit_message_and_bottom_line(); return 0
     if UI.cleaning_level>1:
         try: os.remove(FNAMES.alt_file(tile))
@@ -140,13 +147,14 @@ def build_all(tile):
 ##############################################################################
 def build_tile_list(tile,list_lat_lon,do_osm,do_mesh,do_mask,do_dsf,do_ovl,do_ptc):
     if UI.is_working: return 0
+    UI.red_flag=0
     timer=time.time()
     UI.lvprint(0,"Batch build launched for a number of",len(list_lat_lon),"tiles.")
 
     wall_time = time.clock()
     UI.lvprint(0,"Auto-generating a list of ZL zones around the airports of each tile.")
     zone_lists = smart_zone_list(list_lat_lon=list_lat_lon,
-                                 screen_res=ScreenRes.OcculusRift,
+                                 screen_res=ScreenRes.res_1440p,
                                  fov=60,
                                  fpa=10,
                                  provider='GO2',
@@ -158,23 +166,33 @@ def build_tile_list(tile,list_lat_lon,do_osm,do_mesh,do_mask,do_dsf,do_ovl,do_pt
     UI.lvprint(0, "ZL zones computed in {}s".format(wall_time_delta))
 
     for (k, (lat, lon)) in enumerate(list_lat_lon):
-        UI.vprint(1, "Dealing with tile ", k + 1, "/", len(list_lat_lon), ":", FNAMES.short_latlon(lat, lon))
-        (tile.lat, tile.lon) = (lat, lon)
-        tile.build_dir = FNAMES.build_dir(tile.lat, tile.lon, tile.custom_build_dir)
-        tile.dem = None
+        UI.vprint(1,"Dealing with tile ",k,"/",len(list_lat_lon),":",FNAMES.short_latlon(lat,lon))
+        (tile.lat,tile.lon)=(lat,lon)
+        tile.build_dir=FNAMES.build_dir(tile.lat,tile.lon,tile.custom_build_dir)
+        tile.dem=None
         if do_ptc: tile.read_from_config()
         tile.zone_list = zone_lists[k]
         if (do_osm or do_mesh or do_dsf): tile.make_dirs()
-        if do_osm: VMAP.build_poly_file(tile)
-        if UI.red_flag: UI.exit_message_and_bottom_line(); return 0
-        if do_mesh: MESH.build_mesh(tile)
-        if UI.red_flag: UI.exit_message_and_bottom_line(); return 0
-        if do_mask: MASK.build_masks(tile)
-        if UI.red_flag: UI.exit_message_and_bottom_line(); return 0
-        if do_dsf: build_tile(tile)
-        if UI.red_flag: UI.exit_message_and_bottom_line(); return 0
-        if do_ovl: OVL.build_overlay(lat,lon)
-        if UI.red_flag: UI.exit_message_and_bottom_line(); return 0
+        if do_osm: 
+            VMAP.build_poly_file(tile)
+            if UI.red_flag: UI.exit_message_and_bottom_line(); return 0
+        if do_mesh: 
+            MESH.build_mesh(tile)
+            if UI.red_flag: UI.exit_message_and_bottom_line(); return 0
+        if do_mask: 
+            MASK.build_masks(tile)
+            if UI.red_flag: UI.exit_message_and_bottom_line(); return 0
+        if do_dsf: 
+            build_tile(tile)
+            if UI.red_flag: UI.exit_message_and_bottom_line(); return 0
+        if do_ovl: 
+            OVL.build_overlay(lat,lon)
+            if UI.red_flag: UI.exit_message_and_bottom_line(); return 0
+        try:
+            UI.gui.earth_window.canvas.delete(UI.gui.earth_window.dico_tiles_todo[(lat,lon)]) 
+            UI.gui.earth_window.dico_tiles_todo.pop((lat,lon),None)
+        except Exception as e:
+            print(e)
     UI.lvprint(0,"Batch process completed in",UI.nicer_timer(time.time()-timer))
     return 1
 ##############################################################################
@@ -184,7 +202,10 @@ def remove_unwanted_textures(tile):
     texture_list=[]
     for f in os.listdir(os.path.join(tile.build_dir,'terrain')):
         if f[-4:]!='.ter': continue
-        texture_list.append('_'.join(f[:-4].split('_')[:3])+'.dds')
+        if f[-5]!='y':  #overlay
+            texture_list.append(f.replace('.ter','.dds'))
+        else:
+            texture_list.append('_'.join(f[:-4].split('_')[:-2])+'.dds')
     for f in os.listdir(os.path.join(tile.build_dir,'textures')):
         if f[-4:]!='.dds': continue
         if f not in texture_list:
@@ -195,16 +216,16 @@ def remove_unwanted_textures(tile):
 
 
 class ScreenRes(enum.Enum):
-    _720p = (1280, 720)
-    SD = _720p
-    _1080p = (1920, 1080)
-    HD = _1080p
-    _1440p = (2560, 1440)
-    QHD = _1440p
-    _2160p = (3840, 2160)
-    _4K = _2160p
-    _4320p = (7680, 4320)
-    _8K = _4320p
+    res_720p = (1280, 720)
+    SD = res_720p
+    res_1080p = (1920, 1080)
+    HD = res_1080p
+    res_1440p = (2560, 1440)
+    QHD = res_1440p
+    res_2160p = (3840, 2160)
+    res_4K = res_2160p
+    res_4320p = (7680, 4320)
+    res_8K = res_4320p
     OcculusRift = (1080, 1200)  # Per eye
 
 
