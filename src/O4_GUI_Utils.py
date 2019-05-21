@@ -632,7 +632,9 @@ class Ortho4XP_Custom_ZL(tk.Toplevel):
                                                      fpa=CFG.cover_fpa,
                                                      provider=CFG.default_website,
                                                      max_zl=CFG.cover_zl,
-                                                     min_zl=CFG.default_zl)
+                                                     min_zl=CFG.default_zl,
+                                                     greediness=CFG.cover_greediness,
+                                                     greediness_threshold=CFG.cover_greediness_threshold)
             for zone in custom_zones:
                 self.coords=zone[0][0:-2]
                 self.zlpol.set(zone[1])

@@ -183,7 +183,9 @@ def zone_list_to_ortho_dico(tile):
                                                         fpa=tile.cover_fpa,
                                                         provider=tile.default_website,
                                                         max_zl=tile.cover_zl,
-                                                        min_zl=tile.default_zl))
+                                                        min_zl=tile.default_zl,
+                                                        greediness=tile.cover_greediness,
+                                                        greediness_threshold=tile.cover_greediness_threshold))
             wall_time_delta = datetime.timedelta(seconds=(time.clock() - wall_time))
             UI.lvprint(0, "ZL zones computed in {}s".format(wall_time_delta))
 
