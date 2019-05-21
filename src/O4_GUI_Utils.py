@@ -493,7 +493,7 @@ class Ortho4XP_Custom_ZL(tk.Toplevel):
 
         self.zlpol=tk.IntVar()
         try: # default_zl might still be empty 
-            self.zlpol.set(ZOOM_LEVELS.normalized(self.parent.default_zl.get()), min_zl=15)
+            self.zlpol.set(ZOOM_LEVELS.normalized(self.parent.default_zl.get(), min_zl=15))
         except:
             self.zlpol.set(17)
         self.gb = tk.StringVar()

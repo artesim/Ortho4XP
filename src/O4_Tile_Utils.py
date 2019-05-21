@@ -1,5 +1,3 @@
-import enum
-import datetime
 import os
 import time
 import shutil
@@ -14,9 +12,6 @@ import O4_Mask_Utils as MASK
 import O4_DSF_Utils as DSF
 import O4_Overlay_Utils as OVL
 from O4_Parallel_Utils import parallel_launch, parallel_join
-from O4_AirportDataSource import AirportDataSource, XPlaneTile
-import shapely.geometry
-import shapely.prepared
 
 max_convert_slots=4
 skip_downloads=False
@@ -197,50 +192,3 @@ def remove_unwanted_textures(tile):
             print("Removing obsolete texture",f)
             try: os.remove(os.path.join(tile.build_dir,'textures',f))
             except:pass
-##############################################################################
-
-
-class ScreenRes(enum.Enum):
-    res_720p = (1280, 720)
-    SD = res_720p
-    res_1080p = (1920, 1080)
-    HD = res_1080p
-    res_1440p = (2560, 1440)
-    QHD = res_1440p
-    res_2160p = (3840, 2160)
-    res_4K = res_2160p
-    res_4320p = (7680, 4320)
-    res_8K = res_4320p
-    OcculusRift = (1080, 1200)  # Per eye
-
-
-def smart_zone_list(list_lat_lon, screen_res, fov, fpa, provider, max_zl, min_zl, greediness=1, greediness_threshold=0.70):
-    def _provider_for(_zl):
-        return 'GO2' if max_zl > 19 and zl > 17 else provider
-
-    tiles_to_build = [XPlaneTile(lat, lon) for (lat, lon) in list_lat_lon]
-    airport_collection = AirportDataSource().airports_in(tiles_to_build, include_surrounding_tiles=True)
-
-    all_zones = []
-    for tile in tiles_to_build:
-        tile_poly = shapely.prepared.prep(tile.polygon())
-        tile_zones = []
-        for zl in range(max_zl, min_zl - 1, -1):
-            for polygon in airport_collection.polygons(zl,
-                                                       max_zl,
-                                                       screen_res.value[0] if isinstance(screen_res, ScreenRes) else screen_res,
-                                                       fov,
-                                                       fpa,
-                                                       greediness,
-                                                       greediness_threshold):
-                if not tile_poly.disjoint(polygon):
-                    coords = []
-                    for (x, y) in polygon.exterior.coords:
-                        coords.extend([y, x])
-                    tile_zones.append([coords, zl, _provider_for(zl)])
-        all_zones.append(tile_zones)
-    return all_zones
-
-
-def smart_zone_list_1(tile_lat_lon, screen_res, fov, fpa, provider, max_zl, min_zl, greediness=1, greediness_threshold=0.70):
-    return smart_zone_list([tile_lat_lon], screen_res, fov, fpa, provider, max_zl, min_zl, greediness, greediness_threshold)[0]
