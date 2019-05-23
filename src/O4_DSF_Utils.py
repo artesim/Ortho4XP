@@ -176,16 +176,16 @@ def zone_list_to_ortho_dico(tile):
         elif tile.cover_airports_with_highres == 'Progressive':
             UI.vprint(1,"-> Auto-generating custom ZL zones along the runways of each airport.")
             wall_time = time.clock()
-            tile.zone_list.extend(progressive_zone_list(lat=tile.lat,
-                                                        lon=tile.lon,
-                                                        screen_res=tile.cover_screen_res,
-                                                        fov=tile.cover_fov,
-                                                        fpa=tile.cover_fpa,
-                                                        provider=tile.default_website,
-                                                        max_zl=tile.cover_zl,
-                                                        min_zl=tile.default_zl,
-                                                        greediness=tile.cover_greediness,
-                                                        greediness_threshold=tile.cover_greediness_threshold))
+            tile.zone_list = progressive_zone_list(lat=tile.lat,
+                                                   lon=tile.lon,
+                                                   screen_res=tile.cover_screen_res,
+                                                   fov=tile.cover_fov,
+                                                   fpa=tile.cover_fpa,
+                                                   provider=tile.default_website,
+                                                   max_zl=tile.cover_zl,
+                                                   min_zl=tile.default_zl,
+                                                   greediness=tile.cover_greediness,
+                                                   greediness_threshold=tile.cover_greediness_threshold)
             wall_time_delta = datetime.timedelta(seconds=(time.clock() - wall_time))
             UI.lvprint(0, "ZL zones computed in {}s".format(wall_time_delta))
 
