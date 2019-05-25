@@ -576,26 +576,24 @@ class Ortho4XP_Custom_ZL(tk.Toplevel):
     ####################################################################################################################
     ####################################################################################################################
 
-    def tile_pix_origin(self, lat, lon, zl):
-        tilxleft, tilytop = GEO.wgs84_to_gtile(lat + 1, lon, zl)
-        latmax, lonmin = GEO.gtile_to_wgs84(tilxleft, tilytop, zl)
-        return GEO.wgs84_to_pix(latmax, lonmin, zl)
+    def background_map_layer(self, lat, lon, zl, provider):
+        background_map = Image.open(FNAMES.preview(lat=lat,
+                                                   lon=lon,
+                                                   zoomlevel=zl,
+                                                   provider_code=provider))
 
-    def latlon_to_xy_new(self, pix_origin, lat, lon, zl):
-        pix_x, pix_y = GEO.wgs84_to_pix(lat, lon, zl)
-        return pix_x - pix_origin[0], pix_y - pix_origin[1]
-
-    def draw_tile_boundaries(self, drawer, bg_map_lat, bg_map_lon, bg_map_zl):
-        pix_origin = self.tile_pix_origin(bg_map_lat, bg_map_lon, bg_map_zl)
-        xy_top_left = self.latlon_to_xy_new(pix_origin, bg_map_lat + 1, bg_map_lon, bg_map_zl)
-        xy_bottom_right = self.latlon_to_xy_new(pix_origin, bg_map_lat, bg_map_lon + 1, bg_map_zl)
+        # Draw the tile boundaries of the background map
+        pix_origin = GEO.tile_pix_origin(lat, lon, zl)
+        xy_top_left = GEO.latlon_to_tile_relative_pix(pix_origin, lat + 1, lon, zl)
+        xy_bottom_right = GEO.latlon_to_tile_relative_pix(pix_origin, lat, lon + 1, zl)
+        drawer = ImageDraw.Draw(im=background_map, mode="RGBA")
         drawer.rectangle(xy=[xy_top_left, xy_bottom_right],
                          outline='black',
                          width=2)
 
-    def draw_textures(self, drawer, bg_map_lat, bg_map_lon, bg_map_zl):
-        pix_origin = self.tile_pix_origin(bg_map_lat, bg_map_lon, bg_map_zl)
+        return ImageTk.PhotoImage(image=background_map)
 
+    def progressive_zl_layers(self, base_layer, bg_map_lat, bg_map_lon, bg_map_zl):
         def screen_res():
             if isinstance(CFG.cover_screen_res, CFG.ScreenRes):
                 return CFG.cover_screen_res.value[0]
@@ -607,44 +605,45 @@ class Ortho4XP_Custom_ZL(tk.Toplevel):
         xp_tile = APT_SRC.XPlaneTile(bg_map_lat, bg_map_lon)
         airport_collection = APT_SRC.AirportDataSource().airports_in([xp_tile], include_surrounding_tiles=True)
 
-        all_texture_gtiles = collections.defaultdict(list)
-        for zl in range(CFG.cover_zl, CFG.default_zl - 1, -1):
-            zl_gtiles = airport_collection.gtiles(zl=zl,
-                                                  max_zl=CFG.cover_zl,
-                                                  screen_res=screen_res(),
-                                                  fov=CFG.cover_fov,
-                                                  fpa=CFG.cover_fpa,
-                                                  greediness=CFG.cover_greediness,
-                                                  greediness_threshold=CFG.cover_greediness_threshold)
-            for texture_gtile in zl_gtiles:
-                all_texture_gtiles[zl].append(texture_gtile)
+        pix_origin = GEO.tile_pix_origin(bg_map_lat, bg_map_lon, bg_map_zl)
+        layers = list()
+        for zl in range(CFG.default_zl, CFG.cover_zl + 1):
+            # First compute all the required textures with the current ZL
+            gtiles = airport_collection.gtiles(zl=zl,
+                                               max_zl=CFG.cover_zl,
+                                               screen_res=screen_res(),
+                                               fov=CFG.cover_fov,
+                                               fpa=CFG.cover_fpa,
+                                               greediness=CFG.cover_greediness,
+                                               greediness_threshold=CFG.cover_greediness_threshold)
 
-        for zl in sorted(all_texture_gtiles.keys()):
-            for texture_gtile in all_texture_gtiles[zl]:
+            # Then represent each texture by its own transparent rectangle, all grouped in a single layer (one per ZL)
+            layer = Image.new(mode="RGBA", size=(base_layer.width(), base_layer.height()))
+            drawer = ImageDraw.Draw(im=layer, mode="RGBA")
+            for texture_gtile in gtiles:
                 lat_max, lon_min = GEO.gtile_to_wgs84(texture_gtile.x, texture_gtile.y, texture_gtile.zl)
                 lat_min, lon_max = GEO.gtile_to_wgs84(texture_gtile.x + 16, texture_gtile.y + 16, texture_gtile.zl)
-                xy_top_left = self.latlon_to_xy_new(pix_origin, lat_max, lon_min, bg_map_zl)
-                xy_bottom_right = self.latlon_to_xy_new(pix_origin, lat_min, lon_max, bg_map_zl)
+                xy_top_left = GEO.latlon_to_tile_relative_pix(pix_origin, lat_max, lon_min, bg_map_zl)
+                xy_bottom_right = GEO.latlon_to_tile_relative_pix(pix_origin, lat_min, lon_max, bg_map_zl)
                 drawer.rectangle(xy=[xy_top_left, xy_bottom_right],
                                  fill=ZoomLevels.color_of[texture_gtile.zl] + (int(0.20 * 0xFF),),
                                  outline=(0x00, 0x00, 0x00, 0x0F),
                                  width=1)
+            layers.append(layer)
 
-    def render_background_image(self, canvas, lat, lon, zl, provider):
-        background_map = Image.open(FNAMES.preview(lat=lat,
-                                                   lon=lon,
-                                                   zoomlevel=zl,
-                                                   provider_code=provider))
-        drawer = ImageDraw.Draw(im=background_map, mode="RGBA")
+        return [ImageTk.PhotoImage(image=layer) for layer in layers]
 
-        self.draw_tile_boundaries(drawer, lat, lon, zl)
+    def render_preview_canvas(self, canvas, lat, lon, zl, provider):
+        base_layer = self.background_map_layer(lat, lon, zl, provider)
+        layers = [base_layer]
 
         if CFG.cover_airports_with_highres == 'Progressive':
-            self.draw_textures(drawer, lat, lon, zl)
+            layers.extend(self.progressive_zl_layers(base_layer, lat, lon, zl))
 
-        background_image = ImageTk.PhotoImage(image=background_map)
-        canvas.create_image(0, 0, anchor=NW, image=background_image)
-        return background_image
+        for layer in layers:
+            canvas.create_image(0, 0, anchor=NW, image=layer)
+
+        return layers
 
     def on_test_button(self):
         self.canvas.delete("all")
@@ -652,12 +651,11 @@ class Ortho4XP_Custom_ZL(tk.Toplevel):
         self.canvas.bind("<ButtonPress-3>", self.scroll_start)
         self.canvas.bind("<B3-Motion>", self.scroll_move)
         self.canvas.focus_set()
-        background_image = self.render_background_image(canvas=self.canvas,
-                                                        lat=self.lat,
-                                                        lon=self.lon,
-                                                        zl=int(self.zl_combo.get()),
-                                                        provider=self.map_combo.get())
-        self.test_image = background_image
+        self._tmp_layers = self.render_preview_canvas(canvas=self.canvas,
+                                                      lat=self.lat,
+                                                      lon=self.lon,
+                                                      zl=int(self.zl_combo.get()),
+                                                      provider=self.map_combo.get())
 
     ####################################################################################################################
     ####################################################################################################################
