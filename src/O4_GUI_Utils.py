@@ -530,7 +530,7 @@ class Ortho4XP_Custom_ZL(tk.Toplevel):
         self.zl_combo.grid(row=2,column=0,padx=5,pady=3,sticky=E); row+=1
 
         ttk.Button(self.frame_left, text='Preview',command=lambda: self.preview_tile(lat,lon)).grid(row=row,padx=5,column=0,sticky=N+S+E+W); row+=1
-        ttk.Button(self.frame_left, text='TEST', command=self.on_preview_button).grid(row=row, padx=5, column=0, sticky=N + S + E + W); row+=1
+        ttk.Button(self.frame_left, text='TEST', command=lambda: self.on_preview_button(lat, lon)).grid(row=row, padx=5, column=0, sticky=N + S + E + W); row+=1
 
         # Widgets - Progressive ZLs
         tk.Label(self.frame_left,anchor=W,text="Progressive ZLs",fg = "light green",bg = "dark green",font = "Helvetica 16 bold italic").grid(row=row,column=0,pady=10,sticky=W+E); row+=1
@@ -673,6 +673,20 @@ class Ortho4XP_Custom_ZL(tk.Toplevel):
         # Return the layers for storage, so they're not garbage collected (or they would be removed from the canvas)
         return layers
 
+    def update_internal_state(self, lat, lon):
+        self.zoomlevel = int(self.zl_combo.get())
+        zoomlevel = self.zoomlevel
+        provider_code = self.map_combo.get()
+        (tilxleft, tilytop) = GEO.wgs84_to_gtile(lat + 1, lon, zoomlevel)
+        (self.latmax, self.lonmin) = GEO.gtile_to_wgs84(tilxleft, tilytop, zoomlevel)
+        (self.xmin, self.ymin) = GEO.wgs84_to_pix(self.latmax, self.lonmin, zoomlevel)
+        (tilxright, tilybot) = GEO.wgs84_to_gtile(lat, lon + 1, zoomlevel)
+        (self.latmin, self.lonmax) = GEO.gtile_to_wgs84(tilxright + 1, tilybot + 1, zoomlevel)
+        (self.xmax, self.ymax) = GEO.wgs84_to_pix(self.latmin, self.lonmax, zoomlevel)
+        self.polygon_list = []
+        self.polyobj_list = []
+        self.poly_curr = []
+
     def configure_canvas(self):
         self.canvas.config(scrollregion=self.canvas.bbox(ALL))
         if 'dar' in sys.platform:
@@ -693,17 +707,15 @@ class Ortho4XP_Custom_ZL(tk.Toplevel):
         self.canvas.bind('n', self.save_zone_cmd)
         self.canvas.bind('<BackSpace>', self.delLast)
 
-    def on_preview_button(self):
+    def on_preview_button(self, lat, lon):
         self.canvas.delete("all")
+        self.update_internal_state(lat, lon)
         self.configure_canvas()
         self._canvas_layers = self.render_preview_canvas(canvas=self.canvas,
                                                          lat=self.lat,
                                                          lon=self.lon,
                                                          zl=int(self.zl_combo.get()),
                                                          provider=self.map_combo.get())
-        self.polygon_list=[]
-        self.polyobj_list=[]
-        self.poly_curr=[]
 
     def on_toggle_zl_button(self, zl):
         tag = 'ZL_{:d}'.format(zl)
