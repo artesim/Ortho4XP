@@ -650,7 +650,7 @@ class Ortho4XP_Custom_ZL(tk.Toplevel):
                 xy_top_left = GEO.latlon_to_tile_relative_pix(pix_origin, lat_max, lon_min, bg_map_zl)
                 xy_bottom_right = GEO.latlon_to_tile_relative_pix(pix_origin, lat_min, lon_max, bg_map_zl)
                 drawer.rectangle(xy=[xy_top_left, xy_bottom_right],
-                                 fill=ZoomLevels.color_of[texture_gtile.zl] + (int(0.20 * 0xFF),),
+                                 fill=ZoomLevels.rgba_color_of[texture_gtile.zl],
                                  outline=(0x00, 0x00, 0x00, 0x0F),
                                  width=1)
             layers[zl] = ImageTk.PhotoImage(image=layer)
