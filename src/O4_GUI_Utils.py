@@ -531,8 +531,7 @@ class Ortho4XP_Custom_ZL(tk.Toplevel):
         self.zl_combo.grid(row=2,column=0,padx=5,pady=3,sticky=E); row+=1
 
         ttk.Button(self.frame_left, text='Preview',command=lambda: self.preview_tile(lat,lon)).grid(row=row,padx=5,column=0,sticky=N+S+E+W); row+=1
-
-        ttk.Button(self.frame_left, text='TEST',command=self.on_test_button).grid(row=row,padx=5,column=0,sticky=N+S+E+W); row+=1
+        ttk.Button(self.frame_left, text='TEST', command=self.on_preview_button).grid(row=row, padx=5, column=0, sticky=N + S + E + W); row+=1
 
         tk.Label(self.frame_left,anchor=W,text="Zone params ",fg = "light green",bg = "dark green",font = "Helvetica 16 bold italic").grid(row=row,column=0,pady=10,sticky=W+E); row+=1
 
@@ -593,7 +592,8 @@ class Ortho4XP_Custom_ZL(tk.Toplevel):
 
         return ImageTk.PhotoImage(image=background_map)
 
-    def progressive_zl_layers(self, base_layer, bg_map_lat, bg_map_lon, bg_map_zl):
+    @staticmethod
+    def progressive_zl_layers(base_layer, bg_map_lat, bg_map_lon, bg_map_zl):
         def screen_res():
             if isinstance(CFG.cover_screen_res, CFG.ScreenRes):
                 return CFG.cover_screen_res.value[0]
@@ -606,7 +606,7 @@ class Ortho4XP_Custom_ZL(tk.Toplevel):
         airport_collection = APT_SRC.AirportDataSource().airports_in([xp_tile], include_surrounding_tiles=True)
 
         pix_origin = GEO.tile_pix_origin(bg_map_lat, bg_map_lon, bg_map_zl)
-        layers = list()
+        layers = dict()
         for zl in range(CFG.default_zl, CFG.cover_zl + 1):
             # First compute all the required textures with the current ZL
             gtiles = airport_collection.gtiles(zl=zl,
@@ -629,23 +629,27 @@ class Ortho4XP_Custom_ZL(tk.Toplevel):
                                  fill=ZoomLevels.color_of[texture_gtile.zl] + (int(0.20 * 0xFF),),
                                  outline=(0x00, 0x00, 0x00, 0x0F),
                                  width=1)
-            layers.append(layer)
-
-        return [ImageTk.PhotoImage(image=layer) for layer in layers]
-
-    def render_preview_canvas(self, canvas, lat, lon, zl, provider):
-        base_layer = self.background_map_layer(lat, lon, zl, provider)
-        layers = [base_layer]
-
-        if CFG.cover_airports_with_highres == 'Progressive':
-            layers.extend(self.progressive_zl_layers(base_layer, lat, lon, zl))
-
-        for layer in layers:
-            canvas.create_image(0, 0, anchor=NW, image=layer)
+            layers[zl] = ImageTk.PhotoImage(image=layer)
 
         return layers
 
-    def on_test_button(self):
+    def render_preview_canvas(self, canvas, lat, lon, zl, provider):
+        # Build the layer images, store them in a {tag: layer} dictionary and render them on the canvas
+        layers = {'map': self.background_map_layer(lat, lon, zl, provider)}
+        canvas.create_image(0, 0, anchor=NW, image=layers['map'], tags='map')
+
+        if CFG.cover_airports_with_highres == 'Progressive':
+            zl_layers = self.progressive_zl_layers(layers['map'], lat, lon, zl)
+            for zl in sorted(zl_layers.keys()):
+                tag = 'ZL_{:d}'.format(zl)
+                layer = zl_layers[zl]
+                layers[tag] = layer
+                canvas.create_image(0, 0, anchor=NW, tags=tag, image=layer)
+
+        # Return the layers for storage, so they're not garbage collected (or they would be removed from the canvas)
+        return layers
+
+    def on_preview_button(self):
         self.canvas.delete("all")
         self.canvas.config(scrollregion=self.canvas.bbox(ALL))
         self.canvas.bind("<ButtonPress-3>", self.scroll_start)
