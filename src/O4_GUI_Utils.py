@@ -24,12 +24,12 @@ import O4_Mask_Utils as MASK
 import O4_Tile_Utils as TILE
 import O4_UI_Utils as UI
 import O4_Config_Utils as CFG
-import O4_DSF_Utils as DSF
 import O4_AirportDataSource as APT_SRC
 
 
 # Set OsX=True if you prefer the OsX way of drawing existing tiles but are on Linux or Windows.
 OsX='dar' in sys.platform
+
 
 class ZoomLevels:
     """Container class for Zoom Level constants, colors and utilities :
@@ -40,9 +40,10 @@ class ZoomLevels:
     - ZOOM_LEVELS.custom_levels : return zoom levels available for the Custom Zones
 
     Zoom level colors :
-    - ZOOM_LEVELS.color_of            : a dict of {zl: (red, green, blue)}
-    - ZOOM_LEVELS.tkinter_fg_color_of : a dict of {zl: '#rrggbb'}
-    - ZOOM_LEVELS.tkinter_color_of    : a dict of {zl: '#rrggbb'}
+    - ZOOM_LEVELS.rgba_color_of        : a dict of {zl: (red, green, blue, alpha)}
+    - ZOOM_LEVELS.rgba_border_color_of : a dict of {zl: (red, green, blue, alpha)}
+    - ZOOM_LEVELS.tkinter_fg_color_of  : a dict of {zl: '#rrggbb'}
+    - ZOOM_LEVELS.tkinter_color_of     : a dict of {zl: '#rrggbb'}
 
     Utilities :
     - ZOOM_LEVELS.normalized(zl) : ensure __ZL_MIN__ <= zl <= __ZL_MAX__
@@ -60,25 +61,34 @@ class ZoomLevels:
     osm_levels = [11, 12, 13]
     custom_levels = list(range(__ZL_LOW__, __ZL_MAX__ + 1))
 
+    # For IDE inspection
+    rgba_color_of = None
+    rgba_border_color_of = None
+    tkinter_fg_color_of = None
+    tkiniter_color_of = None
+
     def __new__(cls, *args, **kwargs):
         """Dynamically build a gradient of fg/bg colors for each Zoom Level."""
-        cls.rgb_color_of = {zl: color
-                            for (zl, color) in cls._heat_map(cold_zls=range(cls.__ZL_MIN__, cls.__ZL_LOW__),
-                                                             temperate_zls=range(cls.__ZL_LOW__, cls.__ZL_HIGH__),
-                                                             warm_zls=range(cls.__ZL_HIGH__, cls.__ZL_MAX__ + 1),
-                                                             blazing_zls=range(cls.__ZL_MAX__ + 1,
-                                                                               cls.__ZL_OVERKILL__ + 1))}
+        cls._rgb_color_of = {zl: color
+                             for (zl, color) in cls._heat_map(cold_zls=range(cls.__ZL_MIN__, cls.__ZL_LOW__),
+                                                              temperate_zls=range(cls.__ZL_LOW__, cls.__ZL_HIGH__),
+                                                              warm_zls=range(cls.__ZL_HIGH__, cls.__ZL_MAX__ + 1),
+                                                              blazing_zls=range(cls.__ZL_MAX__ + 1,
+                                                                                cls.__ZL_OVERKILL__ + 1))}
 
-        max_opacity = 0xFF * 0.50
+        max_opacity = 0xFF * 0.70
         zl_diff_max = cls.__ZL_OVERKILL__ - cls.__ZL_MIN__
         cls.rgba_color_of = {zl: (r, g, b, int(max_opacity * (zl - cls.__ZL_MIN__) / zl_diff_max))
                              for zl in range(cls.__ZL_MIN__, cls.__ZL_OVERKILL__ + 1)
-                             for (r, g, b) in [cls.rgb_color_of[zl]]}
+                             for (r, g, b) in [cls._rgb_color_of[zl]]}
+
+        cls.rgba_border_color_of = {zl: (0x00, 0x00, 0x00, int(max_opacity - max_opacity * (zl - cls.__ZL_MIN__) / zl_diff_max))
+                                    for zl in range(cls.__ZL_MIN__, cls.__ZL_OVERKILL__ + 1)}
 
         cls.tkinter_fg_color_of = {zl: ('#000000' if cls.__ZL_MIN__ <= zl <= cls.__ZL_MAX__ else '#FFFFFF')
                                    for zl in range(cls.__ZL_MIN__, cls.__ZL_OVERKILL__ + 1)}
 
-        cls.tkinter_color_of = {zl: '#{0[0]:02X}{0[1]:02X}{0[2]:02X}'.format(cls.rgb_color_of[zl])
+        cls.tkinter_color_of = {zl: '#{0[0]:02X}{0[1]:02X}{0[2]:02X}'.format(cls._rgb_color_of[zl])
                                 for zl in range(cls.__ZL_MIN__, cls.__ZL_OVERKILL__ + 1)}
 
         return super(ZoomLevels, cls).__new__(cls, *args, **kwargs)
@@ -606,7 +616,8 @@ class Ortho4XP_Custom_ZL(tk.Toplevel):
         self.canvas.grid(row=0,column=0,sticky=N+S+E+W)
         self._canvas_layers = dict()
 
-    def background_map_layer(self, lat, lon, zl, provider):
+    @staticmethod
+    def background_map_layer(lat, lon, zl, provider):
         background_map = Image.open(FNAMES.preview(lat=lat,
                                                    lon=lon,
                                                    zoomlevel=zl,
@@ -640,7 +651,7 @@ class Ortho4XP_Custom_ZL(tk.Toplevel):
                 xy_bottom_right = GEO.latlon_to_tile_relative_pix(pix_origin, lat_min, lon_max, bg_map_zl)
                 drawer.rectangle(xy=[xy_top_left, xy_bottom_right],
                                  fill=ZoomLevels.rgba_color_of[texture_gtile.zl],
-                                 outline=(0x00, 0x00, 0x00, 0x0F),
+                                 outline=ZoomLevels.rgba_border_color_of[texture_gtile.zl],
                                  width=1)
             layers[zl] = ImageTk.PhotoImage(image=layer)
 
@@ -1217,7 +1228,7 @@ class Ortho4XP_Earth_Preview(tk.Toplevel):
                         tmpf.close()
                         if not prov: prov='?'
                         if zl:
-                            color=ZoomLevels.tkinter_color_of(zl)
+                            color=ZoomLevels.tkinter_color_of[zl]
                         else:
                             zl='?'
                         content=prov+'\n'+str(zl)
