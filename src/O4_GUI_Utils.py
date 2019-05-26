@@ -1,4 +1,8 @@
+import collections
+import functools
+import glob
 import os
+import re
 import sys
 import shutil
 from math import floor, cos, pi
@@ -6,10 +10,10 @@ import numpy
 import queue
 import threading
 import tkinter as tk
-from   tkinter import RIDGE,N,S,E,W,NW,ALL,END,LEFT,RIGHT,CENTER,HORIZONTAL,filedialog
+from   tkinter import RIDGE,N,S,E,W,NW,ALL,END,LEFT,RIGHT,CENTER,HORIZONTAL,filedialog,NORMAL,HIDDEN
 import tkinter.ttk as ttk
-from PIL import Image, ImageTk
-import O4_Version 
+from PIL import Image, ImageDraw, ImageTk
+import O4_Version
 import O4_Imagery_Utils as IMG
 import O4_File_Names as FNAMES
 import O4_Geo_Utils as GEO
@@ -21,6 +25,8 @@ import O4_Tile_Utils as TILE
 import O4_UI_Utils as UI
 import O4_Config_Utils as CFG
 import O4_DSF_Utils as DSF
+import O4_AirportDataSource as APT_SRC
+
 
 # Set OsX=True if you prefer the OsX way of drawing existing tiles but are on Linux or Windows.
 OsX='dar' in sys.platform
@@ -221,7 +227,7 @@ class Ortho4XP_GUI(tk.Tk):
         build_masks_button=ttk.Button(self.frame_steps, text=" Draw Water Masks  ")#,command=self.build_masks)
         build_masks_button.grid(row=0,column=2, padx=5, pady=0,sticky=N+S+E+W)
         build_masks_button.bind("<ButtonPress-1>", self.build_masks)
-        build_masks_button.bind("<Shift-ButtonPress-1>", self.build_masks) 
+        build_masks_button.bind("<Shift-ButtonPress-1>", self.build_masks)
         ttk.Button(self.frame_steps, text=" Build Imagery/DSF ",command=self.build_tile).grid(row=0,column=3, padx=5, pady=0,sticky=N+S+E+W)
         ttk.Button(self.frame_steps, text="    All in one     ",command=self.build_all).grid(row=0,column=4, padx=5, pady=0,sticky=N+S+E+W)
 
@@ -362,21 +368,21 @@ class Ortho4XP_GUI(tk.Tk):
             UI.vprint(1,"Process aborted.\n"); return 0
         self.working_thread=threading.Thread(target=MESH.build_mesh,args=[tile])
         self.working_thread.start()
-        
+
     def sort_mesh(self,event):
-        try: 
+        try:
             tile=self.tile_from_interface()
             tile.make_dirs()
-        except: 
+        except:
             UI.vprint(1,"Process aborted.\n"); return 0
         self.working_thread=threading.Thread(target=MESH.sort_mesh,args=[tile])
         self.working_thread.start()
-        
+
     def community_mesh(self,event):
-        try: 
+        try:
             tile=self.tile_from_interface()
             tile.make_dirs()
-        except: 
+        except:
             UI.vprint(1,"Process aborted.\n"); return 0
         self.working_thread=threading.Thread(target=MESH.community_mesh,args=[tile])
         self.working_thread.start()
@@ -475,14 +481,14 @@ class Ortho4XP_Custom_ZL(tk.Toplevel):
         self.lat=lat
         self.lon=lon
         self.map_list= sorted([provider_code for provider_code in set(IMG.providers_dict) if IMG.providers_dict[provider_code]['in_GUI']]+sorted(set(IMG.combined_providers_dict)))
-        
+
         self.map_list=[provider_code for provider_code in self.map_list if provider_code!='SEA']
         self.reduced_map_list=[provider_code for provider_code in self.map_list if provider_code!='OSM']
         self.points=[]
         self.coords=[]
         self.polygon_list=[]
         self.polyobj_list=[]
-        
+
         tk.Toplevel.__init__(self)
         self.title('Preview / Custom zoomlevels')
         self.columnconfigure(1,weight=1)
@@ -499,12 +505,14 @@ class Ortho4XP_Custom_ZL(tk.Toplevel):
         self.zmap_choice.set(self.parent.default_website.get())
 
         self.zlpol=tk.IntVar()
-        try: # default_zl might still be empty 
+        try: # default_zl might still be empty
             self.zlpol.set(ZOOM_LEVELS.normalized(self.parent.default_zl.get(), min_zl=15))
         except:
             self.zlpol.set(17)
         self.gb = tk.StringVar()
         self.gb.set('0Gb')
+        self.last_clicked_texture = tk.StringVar()
+        self.last_clicked_texture.set('<no texture clicked yet>')
 
         # Frames
         self.frame_left   =  tk.Frame(self, border=4, relief=RIDGE,bg='light green')
@@ -514,147 +522,291 @@ class Ortho4XP_Custom_ZL(tk.Toplevel):
         self.frame_right.rowconfigure(0,weight=1)
         self.frame_right.columnconfigure(0,weight=1)
 
-        # Widgets
+        # Widgets - Preview Parameters
         row=0
-        tk.Label(self.frame_left,anchor=W,text="Preview params ",fg = "light green",bg = "dark green",font = "Helvetica 16 bold italic").grid(row=row,column=0,sticky=W+E); row+=1
+        tk.Label(self.frame_left,anchor=W,text="Preview Modes",fg = "light green",bg = "dark green",font = "Helvetica 16 bold italic").grid(row=row,column=0,sticky=W+E); row+=1
 
-        tk.Label(self.frame_left,anchor=W,text="Source : ",bg="light green").grid(row=row,column=0,padx=5,pady=3,sticky=W)
+        tk.Label(self.frame_left,anchor=W,text="Base Map Source : ",bg="light green").grid(row=row,column=0,padx=5,pady=3,sticky=W)
         self.map_combo=  ttk.Combobox(self.frame_left,textvariable=self.map_choice,values=self.map_list,width=10,state='readonly',style='O4.TCombobox')
         self.map_combo.grid(row=row,column=0,padx=5,pady=3,sticky=E); row+=1
 
-        tk.Label(self.frame_left,anchor=W,text="Zoomlevel : ",bg="light green").grid(row=row,column=0,padx=5,pady=3,sticky=W)
+        tk.Label(self.frame_left,anchor=W,text="Base Map ZL : ",bg="light green").grid(row=row,column=0,padx=5,pady=3,sticky=W)
         self.zl_combo = ttk.Combobox(self.frame_left, textvariable=self.zl_choice, values=ZOOM_LEVELS.osm_levels, width=3, state='readonly', style='O4.TCombobox')
         self.zl_combo.grid(row=2,column=0,padx=5,pady=3,sticky=E); row+=1
 
-        ttk.Button(self.frame_left, text='Preview',command=lambda: self.preview_tile(lat,lon)).grid(row=row,padx=5,column=0,sticky=N+S+E+W); row+=1
-        tk.Label(self.frame_left,anchor=W,text="Zone params ",fg = "light green",bg = "dark green",font = "Helvetica 16 bold italic").grid(row=row,column=0,pady=10,sticky=W+E); row+=1
+        ttk.Button(self.frame_left, text='Zone List Editor', command=lambda: self.on_preview_button(lat, lon)).grid(row=row, padx=5, column=0, sticky=N + S + E + W); row+=1
+        ttk.Button(self.frame_left, text='Show Existing DDS (if any)', command=lambda: self.on_dds_layout_button(lat, lon)).grid(row=row, padx=5, pady=3, column=0, sticky=N + S + E + W); row+=1
 
-        tk.Label(self.frame_left,anchor=W,text="Source : ",bg="light green").grid(row=row,column=0,sticky=W,padx=5,pady=10)
+        # Widgets - Layers Controls
+        tk.Label(self.frame_left,anchor=W,text="Layer Controls",fg = "light green",bg = "dark green",font = "Helvetica 16 bold italic").grid(row=row,column=0,pady=0,sticky=W+E); row+=1
+        tk.Label(self.frame_left,anchor=W,text="Show/Hide Layers :",bg="light green").grid(row=row,column=0,sticky=W,padx=0,pady=0); row+=1
+        self.frame_zl_toggle_btn = tk.Frame(self.frame_left, border=0, bg='light green')
+        for i in range(CFG.cover_zl - CFG.default_zl + 1):
+            self.frame_zl_toggle_btn.columnconfigure(i, weight=1)
+        self.frame_zl_toggle_btn.grid(row=row, column=0, columnspan=1, sticky=N + S + W + E)
+        row += 1
+        for col, btn_zl in enumerate(ZOOM_LEVELS.custom_levels):
+            btn = tk.Checkbutton(self.frame_zl_toggle_btn,
+                                 bd=4,
+                                 fg=ZOOM_LEVELS.tkinter_fg_color_of[btn_zl],
+                                 bg=ZOOM_LEVELS.tkinter_color_of[btn_zl],
+                                 activebackground=ZOOM_LEVELS.tkinter_color_of[btn_zl],
+                                 selectcolor=ZOOM_LEVELS.tkinter_color_of[btn_zl],
+                                 height=2,
+                                 indicatoron=0,
+                                 text='ZL' + str(btn_zl),
+                                 command=functools.partial(self.on_toggle_zl_button, btn_zl))
+            btn.grid(row=0, column=col, padx=0, pady=0, sticky=N + S + E + W)
+            btn.toggle()
+
+        # Widgets - Custom Zone Tools
+        tk.Label(self.frame_left,anchor=W,text="Manual Zoning Tools",fg = "light green",bg = "dark green",font = "Helvetica 16 bold italic").grid(row=row,column=0,pady=5,sticky=W+E); row+=1
+
+        tk.Label(self.frame_left,anchor=W,text="Source : ",bg="light green").grid(row=row,column=0,sticky=W,padx=5,pady=0)
         self.zmap_combo = ttk.Combobox(self.frame_left,textvariable=self.zmap_choice,values=self.reduced_map_list,width=8,state='readonly',style='O4.TCombobox')
-        self.zmap_combo.grid(row=row,column=0,padx=5,pady=10,sticky=E); row+=1
+        self.zmap_combo.grid(row=row,column=0,padx=5,pady=0,sticky=E); row+=1
 
         self.frame_zlbtn  =  tk.Frame(self.frame_left, border=0,bg='light green')
         for i in range(5): self.frame_zlbtn.columnconfigure(i,weight=1)
-        self.frame_zlbtn.grid(row=row,column=0,columnspan=1,sticky=N+S+W+E); row+=1
-        for zl in ZOOM_LEVELS.custom_levels:
-            col = zl - ZOOM_LEVELS.custom_levels[0]
+        self.frame_zlbtn.grid(row=row,column=0,columnspan=1,pady=5,sticky=N+S+W+E); row+=1
+        for col, btn_zl in enumerate(ZOOM_LEVELS.custom_levels):
             tk.Radiobutton(self.frame_zlbtn,
                            bd=4,
-                           fg=ZOOM_LEVELS.tkinter_fg_color_of[zl],
-                           bg=ZOOM_LEVELS.tkinter_color_of[zl],
-                           activebackground=ZOOM_LEVELS.tkinter_color_of[zl],
-                           selectcolor=ZOOM_LEVELS.tkinter_color_of[zl],
+                           fg=ZOOM_LEVELS.tkinter_fg_color_of[btn_zl],
+                           bg=ZOOM_LEVELS.tkinter_color_of[btn_zl],
+                           activebackground=ZOOM_LEVELS.tkinter_color_of[btn_zl],
+                           selectcolor=ZOOM_LEVELS.tkinter_color_of[btn_zl],
                            height=2,
                            indicatoron=0,
-                           text='ZL' + str(zl),
+                           text='ZL' + str(btn_zl),
                            variable=self.zlpol,
-                           value=zl,
+                           value=btn_zl,
                            command=self.redraw_poly).grid(row=0, column=col, padx=0, pady=0, sticky=N + S + E + W)
-
-        tk.Label(self.frame_left,anchor=W,text="Approx. Add. Size : ",bg="light green").grid(row=row,column=0,padx=5,pady=10,sticky=W)
-        tk.Entry(self.frame_left,width=7,justify=RIGHT,bg="white",fg="blue",textvariable=self.gb).grid(row=row,column=0,padx=5,pady=10,sticky=E); row+=1
 
         ttk.Button(self.frame_left,text='  Save zone  ',command=self.save_zone_cmd).grid(row=row,column=0,padx=5,pady=3,sticky=N+S+E+W); row+=1
         ttk.Button(self.frame_left,text='Delete ZL zone',command=self.delete_zone_cmd).grid(row=row,column=0,padx=5,pady=3,sticky=N+S+E+W); row+=1
         ttk.Button(self.frame_left,text='Make GeoTiffs',command=self.build_geotiffs_ifc).grid(row=row,column=0,padx=5,pady=3,sticky=N+S+E+W); row+=1
         ttk.Button(self.frame_left,text='Extract Mesh ',command=self.extract_mesh_ifc).grid(row=row,column=0,padx=5,pady=3,sticky=N+S+E+W); row+=1
+
         tk.Label(self.frame_left,text="Ctrl+B1 : add texture\nShift+B1: add zone point\nCtrl+B2 : delete zone",bg="light green",justify=LEFT).grid(row=row,column=0,padx=5,pady=20,sticky=N+S+E+W); row+=1
         ttk.Button(self.frame_left,text='    Apply    ',command=self.save_zone_list).grid(row=row,column=0,padx=5,pady=3,sticky=N+S+E+W); row+=1
         ttk.Button(self.frame_left,text='    Reset    ',command=self.delAll).grid(row=row,column=0,padx=5,pady=3,sticky=N+S+E+W); row+=1
-        ttk.Button(self.frame_left,text='    Exit     ',command=self.destroy).grid(row=row,column=0,padx=5,pady=3,sticky=N+S+E+W); row+=1
+
+        # Widgets - Tile Information
+        tk.Label(self.frame_left,anchor=W,text="Tile Infos",fg = "light green",bg = "dark green",font = "Helvetica 16 bold italic").grid(row=row,column=0,pady=10,sticky=W+E); row+=1
+        tk.Label(self.frame_left,anchor=W,text="Selected Texture File: ",bg="light green").grid(row=row,column=0,padx=5,pady=0,sticky=W); row+=1
+        tk.Entry(self.frame_left,width=30,justify=RIGHT,bg="white",fg="blue",textvariable=self.last_clicked_texture).grid(row=row,column=0,padx=5,pady=0,sticky=E); row+=1
+
+        tk.Label(self.frame_left,anchor=W,text="Approx. Add. Size : ",bg="light green").grid(row=row,column=0,padx=5,pady=10,sticky=W)
+        tk.Entry(self.frame_left,width=7,justify=RIGHT,bg="white",fg="blue",textvariable=self.gb).grid(row=row,column=0,padx=5,pady=10,sticky=E); row+=1
+
+        ttk.Button(self.frame_left,text='Close Preview',command=self.destroy).grid(row=row,column=0,padx=5,pady=3,sticky=N+S+E+W); row+=1
+
         self.canvas = tk.Canvas(self.frame_right,bd=0,height=750,width=750)
         self.canvas.grid(row=0,column=0,sticky=N+S+E+W)
+        self._canvas_layers = dict()
 
-    def preview_tile(self,lat,lon):
-        self.zoomlevel=int(self.zl_combo.get())
-        zoomlevel=self.zoomlevel
-        provider_code=self.map_combo.get()
-        (tilxleft,tilytop)=GEO.wgs84_to_gtile(lat+1,lon,zoomlevel)
-        (self.latmax,self.lonmin)=GEO.gtile_to_wgs84(tilxleft,tilytop,zoomlevel)
-        (self.xmin,self.ymin)=GEO.wgs84_to_pix(self.latmax,self.lonmin,zoomlevel)
-        (tilxright,tilybot)=GEO.wgs84_to_gtile(lat,lon+1,zoomlevel)
-        (self.latmin,self.lonmax)=GEO.gtile_to_wgs84(tilxright+1,tilybot+1,zoomlevel)
-        (self.xmax,self.ymax)=GEO.wgs84_to_pix(self.latmin,self.lonmax,zoomlevel)
-        filepreview=FNAMES.preview(lat,lon,zoomlevel,provider_code)
-        if os.path.isfile(filepreview) != True:
-            fargs_ctp=[lat,lon,zoomlevel,provider_code]
-            self.ctp_thread=threading.Thread(target=IMG.create_tile_preview,args=fargs_ctp)
-            self.ctp_thread.start()
-            fargs_dispp=[filepreview,lat,lon]
-            dispp_thread=threading.Thread(target=self.show_tile_preview,args=fargs_dispp)
-            dispp_thread.start()
-        else:
-            self.show_tile_preview(filepreview,lat,lon)
-        return
+    def background_map_layer(self, lat, lon, zl, provider):
+        background_map = Image.open(FNAMES.preview(lat=lat,
+                                                   lon=lon,
+                                                   zoomlevel=zl,
+                                                   provider_code=provider))
 
-    def show_tile_preview(self,filepreview,lat,lon):
-        for item in self.polyobj_list:
-            try: self.canvas.delete(item)
-            except: pass
-        try: self.canvas.delete(self.img_map)
-        except: pass
-        try: self.canvas.delete(self.boundary)
-        except: pass
-        try: self.ctp_thread.join()
-        except: pass
-        self.image=Image.open(filepreview)
-        self.photo=ImageTk.PhotoImage(self.image)
-        self.map_x_res=self.photo.width()
-        self.map_y_res=self.photo.height()
-        self.img_map=self.canvas.create_image(0,0,anchor=NW,image=self.photo)
+        # Draw the tile boundaries of the background map
+        pix_origin = GEO.tile_pix_origin(lat, lon, zl)
+        xy_top_left = GEO.latlon_to_tile_relative_pix(pix_origin, lat + 1, lon, zl)
+        xy_bottom_right = GEO.latlon_to_tile_relative_pix(pix_origin, lat, lon + 1, zl)
+        drawer = ImageDraw.Draw(im=background_map, mode="RGBA")
+        drawer.rectangle(xy=[xy_top_left, xy_bottom_right],
+                         outline='black',
+                         width=2)
+
+        return ImageTk.PhotoImage(image=background_map)
+
+    @staticmethod
+    def _texture_layers(base_layer, bg_map_lat, bg_map_lon, bg_map_zl, gtiles_dict):
+        pix_origin = GEO.tile_pix_origin(bg_map_lat, bg_map_lon, bg_map_zl)
+
+        layers = dict()
+        for zl in sorted(gtiles_dict.keys()):
+            # Represent each texture by its own transparent rectangle, all grouped in a single layer (one per ZL)
+            gtiles = gtiles_dict[zl]
+            layer = Image.new(mode="RGBA", size=(base_layer.width(), base_layer.height()))
+            drawer = ImageDraw.Draw(im=layer, mode="RGBA")
+            for texture_gtile in gtiles:
+                lat_max, lon_min = GEO.gtile_to_wgs84(texture_gtile.x, texture_gtile.y, texture_gtile.zl)
+                lat_min, lon_max = GEO.gtile_to_wgs84(texture_gtile.x + 16, texture_gtile.y + 16, texture_gtile.zl)
+                xy_top_left = GEO.latlon_to_tile_relative_pix(pix_origin, lat_max, lon_min, bg_map_zl)
+                xy_bottom_right = GEO.latlon_to_tile_relative_pix(pix_origin, lat_min, lon_max, bg_map_zl)
+                drawer.rectangle(xy=[xy_top_left, xy_bottom_right],
+                                 fill=ZoomLevels.rgba_color_of[texture_gtile.zl],
+                                 outline=(0x00, 0x00, 0x00, 0x0F),
+                                 width=1)
+            layers[zl] = ImageTk.PhotoImage(image=layer)
+
+        return layers
+
+    def progressive_zl_layers(self, base_layer, bg_map_lat, bg_map_lon, bg_map_zl):
+        def screen_res():
+            if isinstance(CFG.cover_screen_res, CFG.ScreenRes):
+                return CFG.cover_screen_res.value[0]
+            elif isinstance(CFG.cover_screen_res, int):
+                return CFG.cover_screen_res
+            else:
+                return CFG.ScreenRes.from_config_value(CFG.cover_screen_res)[0]
+
+        xp_tile = APT_SRC.XPlaneTile(bg_map_lat, bg_map_lon)
+        airport_collection = APT_SRC.AirportDataSource().airports_in([xp_tile], include_surrounding_tiles=True)
+
+        # Compute all the required textures for each ZL
+        progressive_gtiles = dict()
+        for zl in range(CFG.default_zl, CFG.cover_zl + 1):
+            progressive_gtiles[zl] = set(airport_collection.gtiles(zl=zl,
+                                                                   max_zl=CFG.cover_zl,
+                                                                   screen_res=screen_res(),
+                                                                   fov=CFG.cover_fov,
+                                                                   fpa=CFG.cover_fpa,
+                                                                   greediness=CFG.cover_greediness,
+                                                                   greediness_threshold=CFG.cover_greediness_threshold))
+
+        return self._texture_layers(base_layer, bg_map_lat, bg_map_lon, bg_map_zl, progressive_gtiles)
+
+    def dds_layout_layers(self, base_layer, bg_map_lat, bg_map_lon, bg_map_zl):
+        build_dir = os.path.normpath(FNAMES.build_dir(bg_map_lat, bg_map_lon, self.parent.custom_build_dir_entry.get()))
+        re_dds_file = re.compile(r'^(?P<y>\d+)_(?P<x>\d+)_(?:.*)(?P<zl>\d{2})\.dds$')
+
+        dds_gtiles = collections.defaultdict(set)
+        for dds_file in glob.glob(os.path.join(build_dir, 'textures', '*.dds')):
+            m = re_dds_file.match(os.path.basename(dds_file))
+            if not m:
+                raise Exception("Couldn't parse the dds filename : {}".format(dds_file))
+            dds_gtiles[int(m.group('zl'))].add(APT_SRC.GTile(x=int(m.group('x')),
+                                                             y=int(m.group('y')),
+                                                             zl=int(m.group('zl'))))
+
+        return self._texture_layers(base_layer, bg_map_lat, bg_map_lon, bg_map_zl, dds_gtiles)
+
+    def render_preview_canvas(self, canvas, lat, lon, zl, provider):
+        # Build the layer images, store them in a {tag: layer} dictionary and render them on the canvas
+        layers = {'map': self.background_map_layer(lat, lon, zl, provider)}
+        canvas.create_image(0, 0, anchor=NW, image=layers['map'], tags='map')
+
+        if CFG.cover_airports_with_highres == 'Progressive':
+            zl_layers = self.progressive_zl_layers(layers['map'], lat, lon, zl)
+            for zl in sorted(zl_layers.keys()):
+                tag = 'ZL_{:d}'.format(zl)
+                layer = zl_layers[zl]
+                layers[tag] = layer
+                canvas.create_image(0, 0, anchor=NW, tags=tag, image=layer)
+
+        # Return the layers for storage, so they're not garbage collected (or they would be removed from the canvas)
+        return layers
+
+    def render_dds_layout_canvas(self, canvas, lat, lon, zl, provider):
+        # Build the layer images, store them in a {tag: layer} dictionary and render them on the canvas
+        layers = {'map': self.background_map_layer(lat, lon, zl, provider)}
+        canvas.create_image(0, 0, anchor=NW, image=layers['map'], tags='map')
+
+        zl_layers = self.dds_layout_layers(layers['map'], lat, lon, zl)
+        for zl in sorted(zl_layers.keys()):
+            tag = 'ZL_{:d}'.format(zl)
+            layer = zl_layers[zl]
+            layers[tag] = layer
+            canvas.create_image(0, 0, anchor=NW, tags=tag, image=layer)
+
+        # Return the layers for storage, so they're not garbage collected (or they would be removed from the canvas)
+        return layers
+
+    def update_internal_state(self, lat, lon):
+        self.zoomlevel = int(self.zl_combo.get())
+        zoomlevel = self.zoomlevel
+        tilxleft, tilytop = GEO.wgs84_to_gtile(lat + 1, lon, zoomlevel)
+        self.latmax, self.lonmin = GEO.gtile_to_wgs84(tilxleft, tilytop, zoomlevel)
+        self.xmin, self.ymin = GEO.wgs84_to_pix(self.latmax, self.lonmin, zoomlevel)
+        tilxright, tilybot = GEO.wgs84_to_gtile(lat, lon + 1, zoomlevel)
+        self.latmin, self.lonmax = GEO.gtile_to_wgs84(tilxright + 1, tilybot + 1, zoomlevel)
+        self.xmax, self.ymax = GEO.wgs84_to_pix(self.latmin, self.lonmax, zoomlevel)
+        self.polygon_list = []
+        self.polyobj_list = []
+        self.poly_curr = []
+
+    def configure_canvas(self):
         self.canvas.config(scrollregion=self.canvas.bbox(ALL))
         if 'dar' in sys.platform:
             self.canvas.bind("<ButtonPress-2>", self.scroll_start)
             self.canvas.bind("<B2-Motion>", self.scroll_move)
-            self.canvas.bind("<Control-ButtonPress-2>",self.delPol)
+            self.canvas.bind("<Control-ButtonPress-2>", self.delPol)
         else:
             self.canvas.bind("<ButtonPress-3>", self.scroll_start)
             self.canvas.bind("<B3-Motion>", self.scroll_move)
-            self.canvas.bind("<Control-ButtonPress-3>",self.delPol)
-        self.canvas.bind("<ButtonPress-1>",lambda event: self.canvas.focus_set())
-        self.canvas.bind("<Shift-ButtonPress-1>",self.newPoint)
-        self.canvas.bind("<Control-Shift-ButtonPress-1>",self.newPointGrid)
-        self.canvas.bind("<Control-ButtonPress-1>",self.newPol)
+            self.canvas.bind("<Control-ButtonPress-3>", self.delPol)
+        self.canvas.bind("<ButtonPress-1>", self.on_map_click)
+        self.canvas.bind("<Shift-ButtonPress-1>", self.newPoint)
+        self.canvas.bind("<Control-Shift-ButtonPress-1>", self.newPointGrid)
+        self.canvas.bind("<Control-ButtonPress-1>", self.newPol)
         self.canvas.focus_set()
         self.canvas.bind('p', self.newPoint)
         self.canvas.bind('d', self.delete_zone_cmd)
         self.canvas.bind('n', self.save_zone_cmd)
         self.canvas.bind('<BackSpace>', self.delLast)
-        self.polygon_list=[]
-        self.polyobj_list=[]
-        self.poly_curr=[]
-        bdpoints=[]
-        for [latp,lonp] in [[lat,lon],[lat,lon+1],[lat+1,lon+1],[lat+1,lon]]:
-                [x,y]=self.latlon_to_xy(latp,lonp,self.zoomlevel)
-                bdpoints+=[int(x),int(y)]
-        self.boundary=self.canvas.create_polygon(bdpoints,
-                           outline='black',fill='', width=2)
 
-        # If Progressive mode is enabled, preview the computed custom ZL zones for this tile
-        if CFG.cover_airports_with_highres == 'Progressive':
-            custom_zones = DSF.progressive_zone_list(lat=self.lat,
-                                                     lon=self.lon,
-                                                     screen_res=CFG.cover_screen_res,
-                                                     fov=CFG.cover_fov,
-                                                     fpa=CFG.cover_fpa,
-                                                     provider=CFG.default_website,
-                                                     max_zl=CFG.cover_zl,
-                                                     min_zl=CFG.default_zl,
-                                                     greediness=CFG.cover_greediness,
-                                                     greediness_threshold=CFG.cover_greediness_threshold)
-            for zone in custom_zones:
-                self.coords=zone[0][0:-2]
-                self.zlpol.set(zone[1])
-                self.zmap_combo.set(zone[2])
-                self.points=[]
-                for idxll in range(0,len(self.coords)//2):
-                    latp=self.coords[2*idxll]
-                    lonp=self.coords[2*idxll+1]
-                    [x,y]=self.latlon_to_xy(latp,lonp,self.zoomlevel)
-                    self.points+=[int(x),int(y)]
+    def apply_custom_zone_list(self):
+        for zone in CFG.zone_list:
+            self.coords = zone[0][0:-2]
+            self.zlpol.set(zone[1])
+            self.zmap_combo.set(zone[2])
+            self.points = []
+            for idxll in range(0, len(self.coords) // 2):
+                latp = self.coords[2 * idxll]
+                lonp = self.coords[2 * idxll + 1]
+                [x, y] = self.latlon_to_xy(latp, lonp, self.zoomlevel)
+                self.points += [int(x), int(y)]
+            self.redraw_poly()
+            self.save_zone_cmd()
 
-                self.redraw_poly()
-                self.save_zone_cmd()
+    def on_preview_button(self, lat, lon):
+        self.canvas.delete("all")
+        self.update_internal_state(lat, lon)
+        self.configure_canvas()
+        self._canvas_layers = self.render_preview_canvas(canvas=self.canvas,
+                                                         lat=self.lat,
+                                                         lon=self.lon,
+                                                         zl=int(self.zl_combo.get()),
+                                                         provider=self.map_combo.get())
+        self.apply_custom_zone_list()
+
+    def on_dds_layout_button(self, lat, lon):
+        self.canvas.delete("all")
+        self.update_internal_state(lat, lon)
+        self.configure_canvas()
+        self._canvas_layers = self.render_dds_layout_canvas(canvas=self.canvas,
+                                                            lat=self.lat,
+                                                            lon=self.lon,
+                                                            zl=int(self.zl_combo.get()),
+                                                            provider=self.map_combo.get())
+        self.apply_custom_zone_list()
+
+    def on_toggle_zl_button(self, zl):
+        tag = 'ZL_{:d}'.format(zl)
+        if tag in self._canvas_layers:
+            current_config = self.canvas.itemconfigure(tag)
+            if current_config['state'][4] == HIDDEN:
+                self.canvas.itemconfigure(tag, state=NORMAL)
+            else:
+                self.canvas.itemconfigure(tag, state=HIDDEN)
+
+    def on_map_click(self, event):
+        map_zl = self.zoomlevel
+        custom_poly_zl = self.zlpol.get()
+        [latp, lonp] = self.xy_to_latlon(x=self.canvas.canvasx(event.x),
+                                         y=self.canvas.canvasy(event.y),
+                                         zoomlevel=map_zl)
+        (a, b) = GEO.wgs84_to_orthogrid(latp, lonp, custom_poly_zl)
+        (latmax, lonmin) = GEO.gtile_to_wgs84(a, b, custom_poly_zl)
+        (x, y) = GEO.wgs84_to_orthogrid(latmax, lonmin, custom_poly_zl)
+        gtile = APT_SRC.GTile(x, y, custom_poly_zl)
+        self.last_clicked_texture.set('{}_{}_{}{}.dds'.format(gtile.y, gtile.x, self.zmap_choice.get(), gtile.zl))
+        self.canvas.focus_set()
 
     def scroll_start(self,event):
         self.canvas.scan_mark(event.x, event.y)
@@ -672,9 +824,9 @@ class Ortho4XP_Custom_ZL(tk.Toplevel):
         try:
             color = ZOOM_LEVELS.tkinter_color_of[self.zlpol.get()]
             if len(self.points) >= 4:
-                self.poly_curr = self.canvas.create_polygon(self.points, outline=color, fill='', width=2)
+                self.poly_curr = self.canvas.create_polygon(self.points, outline=color, fill='', width=2, tags='ZL_{:d}'.format(self.zlpol.get()))
             else:
-                self.poly_curr = self.canvas.create_polygon(self.points, outline=color, fill='', width=5)
+                self.poly_curr = self.canvas.create_polygon(self.points, outline=color, fill='', width=5, tags='ZL_{:d}'.format(self.zlpol.get()))
         except:
             pass
         return
@@ -731,7 +883,7 @@ class Ortho4XP_Custom_ZL(tk.Toplevel):
                 self.canvas.delete(self.polyobj_list[idx])
                 self.polyobj_list.pop(idx)
         return
-        
+
     def delAll(self):
         copy=self.polygon_list[:]
         for poly in copy:
@@ -744,7 +896,7 @@ class Ortho4XP_Custom_ZL(tk.Toplevel):
         except:
             pass
         self.compute_size()
-        return        
+        return
 
     def xy_to_latlon(self,x,y,zoomlevel):
         pix_x=x+self.xmin
@@ -850,12 +1002,12 @@ class Ortho4XP_Custom_ZL(tk.Toplevel):
         for item in ordered_list:
             tmp=[]
             for pt in item[1]:
-                tmp.append(pt) 
+                tmp.append(pt)
             for pt in item[1][0:2]:     # repeat first point for point_in_polygon algo
-                tmp.append(pt) 
+                tmp.append(pt)
             zone_list.append([tmp,item[2],item[3]])
         CFG.zone_list=zone_list
-        #self.destroy()    
+        #self.destroy()
         return
 ############################################################################################
 
@@ -956,9 +1108,9 @@ class Ortho4XP_Earth_Preview(tk.Toplevel):
         self.canvas.bind("<Control-ButtonPress-1>",self.toggle_to_custom)
         self.canvas.focus_set()
         self.draw_canvas(self.nx0,self.ny0)
-        self.active_lat=lat 
-        self.active_lon=lon 
-        self.latlon.set(FNAMES.short_latlon(self.active_lat,self.active_lon))        
+        self.active_lat=lat
+        self.active_lon=lon
+        self.latlon.set(FNAMES.short_latlon(self.active_lat,self.active_lon))
         [x0,y0]=GEO.wgs84_to_pix(self.active_lat+1,self.active_lon,self.earthzl)
         [x1,y1]=GEO.wgs84_to_pix(self.active_lat,self.active_lon+1,self.earthzl)
         self.active_tile=self.canvas.create_rectangle(x0,y0,x1,y1,fill='',outline='yellow',width=3)
@@ -992,8 +1144,8 @@ class Ortho4XP_Earth_Preview(tk.Toplevel):
                         lon=int(dir_name.split("XP_")[1][3:7])
                     except:
                         continue
-                    # With the enlarged accepetance rule for directory name there might be more than one tile for the same (lat,lon), we skip all but the first encountered.    
-                    if (lat,lon) in self.dico_tiles_done: continue                      
+                    # With the enlarged accepetance rule for directory name there might be more than one tile for the same (lat,lon), we skip all but the first encountered.
+                    if (lat,lon) in self.dico_tiles_done: continue
                     [x0,y0]=GEO.wgs84_to_pix(lat+1,lon,self.earthzl)
                     [x1,y1]=GEO.wgs84_to_pix(lat,lon+1,self.earthzl)
                     if os.path.isfile(os.path.join(self.working_dir,dir_name,"Earth nav data",FNAMES.long_latlon(lat,lon)+'.dsf')):
@@ -1054,7 +1206,7 @@ class Ortho4XP_Earth_Preview(tk.Toplevel):
                         found_config=True
                     except:
                         found_config=False
-                    if found_config:                        
+                    if found_config:
                         prov=zl=''
                         for line in tmpf.readlines():
                             if line[:15]=='default_website':
@@ -1087,12 +1239,12 @@ class Ortho4XP_Earth_Preview(tk.Toplevel):
         for (lat,lon) in self.dico_tiles_todo:
             [x0,y0]=GEO.wgs84_to_pix(lat+1,lon,self.earthzl)
             [x1,y1]=GEO.wgs84_to_pix(lat,lon+1,self.earthzl)
-            self.canvas.delete(self.dico_tiles_todo[(lat,lon)]) 
+            self.canvas.delete(self.dico_tiles_todo[(lat,lon)])
             self.dico_tiles_todo[(lat,lon)]=self.canvas.create_rectangle(x0,y0,x1,y1,fill='red',stipple='gray12') if not OsX else self.canvas.create_rectangle(x0,y0,x1,y1,outline='red',width=2)
         return
-    
+
     def trash(self):
-        if self.v_['OSM data'].get(): 
+        if self.v_['OSM data'].get():
             try: shutil.rmtree(FNAMES.osm_dir(self.active_lat,self.active_lon))
             except Exception as e:
                 UI.vprint(3,e)
@@ -1152,8 +1304,8 @@ class Ortho4XP_Earth_Preview(tk.Toplevel):
                     self.canvas.itemconfig(self.dico_tiles_done[(lat,lon)][0],stipple='gray12')
                 else:
                     self.canvas.itemconfig(self.dico_tiles_done[(lat,lon)][1],font=('Helvetica','12','normal'))
-                return 
-        elif self.grouped: 
+                return
+        elif self.grouped:
             link=os.path.join(CFG.xplane_install_dir,'Custom Scenery','zOrtho4XP_'+os.path.basename(self.working_dir))
             target=os.path.realpath(self.working_dir)
             if os.path.isdir(link) and os.path.samefile(os.path.realpath(link),os.path.realpath(self.working_dir)):
@@ -1164,7 +1316,7 @@ class Ortho4XP_Earth_Preview(tk.Toplevel):
                     else:
                         self.canvas.itemconfig(self.dico_tiles_done[(lat,lon)][1],font=('Helvetica','12','normal'))
                 return
-        # in case this was a broken link        
+        # in case this was a broken link
         try: os.remove(link)
         except: pass
         if ('dar' in sys.platform) or ('win' not in sys.platform): # Mac and Linux
@@ -1179,10 +1331,10 @@ class Ortho4XP_Earth_Preview(tk.Toplevel):
         else:
             for (lat0,lon0) in self.dico_tiles_done:
                 if not OsX:
-                    self.canvas.itemconfig(self.dico_tiles_done[(lat0,lon0)][0],stipple='gray50')    
+                    self.canvas.itemconfig(self.dico_tiles_done[(lat0,lon0)][0],stipple='gray50')
                 else:
                     self.canvas.itemconfig(self.dico_tiles_done[(lat,lon)][1],font=('Helvetica','12','bold underline'))
-        return 
+        return
 
     def add_tile(self,event):
         x=self.canvas.canvasx(event.x)
@@ -1192,11 +1344,11 @@ class Ortho4XP_Earth_Preview(tk.Toplevel):
             [x0,y0]=GEO.wgs84_to_pix(lat+1,lon,self.earthzl)
             [x1,y1]=GEO.wgs84_to_pix(lat,lon+1,self.earthzl)
             if not OsX:
-                self.dico_tiles_todo[(lat,lon)]=self.canvas.create_rectangle(x0,y0,x1,y1,fill='red',stipple='gray12') 
+                self.dico_tiles_todo[(lat,lon)]=self.canvas.create_rectangle(x0,y0,x1,y1,fill='red',stipple='gray12')
             else:
                 self.dico_tiles_todo[(lat,lon)]=self.canvas.create_rectangle(x0+2,y0+2,x1-2,y1-2,outline='red',width=1)
         else:
-            self.canvas.delete(self.dico_tiles_todo[(lat,lon)]) 
+            self.canvas.delete(self.dico_tiles_todo[(lat,lon)])
             self.dico_tiles_todo.pop((lat,lon),None)
         return
 
